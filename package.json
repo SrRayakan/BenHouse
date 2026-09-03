@@ -1,0 +1,35 @@
+{
+  "name": "benhouse-v0-4",
+  "version": "0.4.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24.19.0",
+    "pnpm": ">=11.19.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @benhouse/web --filter @benhouse/api --filter @benhouse/worker dev",
+    "dev:web": "pnpm --filter @benhouse/web dev",
+    "dev:api": "pnpm --filter @benhouse/api dev",
+    "dev:worker": "pnpm --filter @benhouse/worker dev",
+    "build": "pnpm -r --workspace-concurrency=1 --if-present build",
+    "build:web": "pnpm --filter @benhouse/web build",
+    "build:api": "pnpm --filter @benhouse/api build",
+    "build:worker": "pnpm --filter @benhouse/worker build",
+    "lint": "pnpm -r --workspace-concurrency=1 --if-present lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm -r --workspace-concurrency=1 --if-present typecheck",
+    "test": "pnpm -r --workspace-concurrency=1 --if-present test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^24.10.1",
+    "eslint": "^9.39.1",
+    "globals": "^16.5.0",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.47.0",
+    "vitest": "^4.0.18"
+  }
+}
