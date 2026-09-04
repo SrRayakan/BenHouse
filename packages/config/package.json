@@ -2,10 +2,12 @@
   "name": "@benhouse/config",
   "version": "0.4.0",
   "private": true,
-  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --pool=vmThreads --maxWorkers=1 --passWithNoTests"
+    "test": "vitest run src --pool=vmThreads --maxWorkers=1 --passWithNoTests"
   }
 }

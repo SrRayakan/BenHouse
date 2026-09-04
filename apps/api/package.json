@@ -3,14 +3,19 @@
   "version": "0.4.0",
   "private": true,
   "scripts": {
+    "predev": "pnpm --filter @benhouse/config build && pnpm --filter @benhouse/database build",
     "dev": "nest start --watch",
+    "prebuild": "pnpm --filter @benhouse/config build && pnpm --filter @benhouse/database build",
     "build": "nest build",
     "start": "node dist/main.js",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run src --pool=vmThreads --maxWorkers=1"
+    "test": "vitest run src --exclude '**/*.integration.test.ts' --pool=vmThreads --maxWorkers=1",
+    "test:integration": "node ../../packages/database/scripts/with-test-database.mjs vitest run --config vitest.integration.config.mts"
   },
   "dependencies": {
+    "@benhouse/config": "workspace:*",
+    "@benhouse/database": "workspace:*",
     "@nestjs/common": "^11.1.11",
     "@nestjs/core": "^11.1.11",
     "@nestjs/platform-express": "^11.1.11",

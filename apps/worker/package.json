@@ -3,12 +3,18 @@
   "version": "0.4.0",
   "private": true,
   "scripts": {
+    "predev": "pnpm --filter @benhouse/config build && pnpm --filter @benhouse/database build",
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run src --pool=vmThreads --maxWorkers=1"
+    "test": "vitest run src --exclude '**/*.integration.test.ts' --pool=vmThreads --maxWorkers=1",
+    "test:integration": "node ../../packages/database/scripts/with-test-database.mjs vitest run --config vitest.integration.config.mts"
+  },
+  "dependencies": {
+    "@benhouse/config": "workspace:*",
+    "@benhouse/database": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.21.0"

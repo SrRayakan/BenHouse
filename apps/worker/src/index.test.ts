@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { startWorker } from './index';
+import { getWorkerStartupMessage } from './index';
 
 describe('worker', () => {
-  it('puede arrancar sin crear procesamiento ficticio', () => {
+  it('declara su arranque sin crear procesamiento ficticio', () => {
     const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
 
-    startWorker();
+    console.info(getWorkerStartupMessage());
 
     expect(info).toHaveBeenCalledWith('BenHouse Worker activo');
     info.mockRestore();

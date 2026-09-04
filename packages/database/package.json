@@ -1,0 +1,26 @@
+{
+  "name": "@benhouse/database",
+  "version": "0.4.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run src --exclude '**/*.integration.test.ts' --pool=vmThreads --maxWorkers=1 --passWithNoTests",
+    "test:integration": "node scripts/with-test-database.mjs prisma migrate deploy --schema prisma/schema.prisma && node scripts/with-test-database.mjs vitest run --config vitest.integration.config.mts",
+    "generate": "node scripts/with-root-environment.mjs prisma generate --schema prisma/schema.prisma",
+    "validate": "node scripts/with-root-environment.mjs prisma validate --schema prisma/schema.prisma",
+    "migrate": "node scripts/with-root-environment.mjs prisma migrate dev --schema prisma/schema.prisma",
+    "migrate:deploy": "node scripts/with-root-environment.mjs prisma migrate deploy --schema prisma/schema.prisma",
+    "status": "node scripts/with-root-environment.mjs prisma migrate status --schema prisma/schema.prisma"
+  },
+  "dependencies": {
+    "@benhouse/config": "workspace:*",
+    "@prisma/client": "6.19.1"
+  },
+  "devDependencies": {
+    "prisma": "6.19.1"
+  }
+}
