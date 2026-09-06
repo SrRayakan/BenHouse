@@ -42,6 +42,8 @@ pnpm db:migrate:deploy
 
 `TEST_DATABASE_URL` debe apuntar a una base diferente de `DATABASE_URL`. Las pruebas de integración se niegan a ejecutarse si ambas URLs coinciden.
 
+El runner de integración fuerza `NODE_ENV=test`, compara host, puerto efectivo y base de ambas URLs (sin considerar `schema`), exige una base terminada en `_test` y solo acepta los hosts definidos en `TEST_DATABASE_ALLOWED_HOSTS`. Estas barreras reducen errores de configuración, pero no resuelven alias DNS que puedan referir al mismo servidor ni comprueban roles, permisos o ACL reales. No sustituyen una base física y credenciales de test dedicadas: en CI, staging y cualquier entorno compartido deben usarse credenciales con mínimo privilegio y un destino físico dedicado.
+
 Comandos útiles:
 
 ```bash

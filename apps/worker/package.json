@@ -5,6 +5,7 @@
   "scripts": {
     "predev": "pnpm --filter @benhouse/config build && pnpm --filter @benhouse/database build",
     "dev": "tsx src/index.ts",
+    "prebuild": "pnpm --filter @benhouse/config build && pnpm --filter @benhouse/database build",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "lint": "eslint src",

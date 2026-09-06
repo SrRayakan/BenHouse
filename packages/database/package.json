@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run src --exclude '**/*.integration.test.ts' --pool=vmThreads --maxWorkers=1 --passWithNoTests",
+    "test": "vitest run src scripts --exclude '**/*.integration.test.ts' --pool=vmThreads --maxWorkers=1 --passWithNoTests",
     "test:integration": "node scripts/with-test-database.mjs prisma migrate deploy --schema prisma/schema.prisma && node scripts/with-test-database.mjs vitest run --config vitest.integration.config.mts",
     "generate": "node scripts/with-root-environment.mjs prisma generate --schema prisma/schema.prisma",
     "validate": "node scripts/with-root-environment.mjs prisma validate --schema prisma/schema.prisma",

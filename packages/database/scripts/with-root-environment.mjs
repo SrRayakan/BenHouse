@@ -9,7 +9,7 @@ export function loadRootEnvironment() {
   }
 }
 
-export function execute(command, arguments_) {
+export function execute(command, arguments_, environment = process.env) {
   const cliPaths = {
     prisma: resolve(import.meta.dirname, '../node_modules/prisma/build/index.js'),
     vitest: resolve(import.meta.dirname, '../../../node_modules/vitest/vitest.mjs'),
@@ -21,7 +21,7 @@ export function execute(command, arguments_) {
 
   const result = spawnSync(process.execPath, [cliPath, ...arguments_], {
     cwd: process.cwd(),
-    env: process.env,
+    env: environment,
     stdio: 'inherit',
     shell: false,
   });

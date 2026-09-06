@@ -9,11 +9,6 @@ const LEVEL_ORDER: Record<LogLevel, number> = {
 };
 
 function normalizeMessage(message: unknown): unknown {
-  if (typeof message === 'object' && message !== null) {
-    return Object.fromEntries(
-      Object.entries(message).map(([key, value]) => [key, redactSensitiveValue(value)]),
-    );
-  }
   return redactSensitiveValue(message);
 }
 
@@ -60,7 +55,7 @@ export class StructuredLogger implements LoggerService {
     const line = JSON.stringify({
       timestamp: new Date().toISOString(),
       level,
-      context,
+      context: context === undefined ? undefined : redactSensitiveValue(context),
       message: normalizeMessage(message),
       ...extra,
     });

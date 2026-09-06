@@ -51,4 +51,29 @@ describe('readAppConfig', () => {
     expect(redactSensitiveValue(validEnvironment.DATABASE_URL)).toBe('[REDACTED_DATABASE_URL]');
     expect(redactSensitiveValue('token=abc123')).toBe('token=[REDACTED]');
   });
+
+  it('redacta claves sensibles en objetos, arrays, ciclos y profundidad excesiva', () => {
+    const nested: Record<string, unknown> = {
+      auth: {
+        password: 'no-debe-aparecer',
+        cookies: ['session=secreto'],
+        nested: [{ authorization: 'Bearer secreto' }],
+      },
+    };
+    nested.self = nested;
+
+    const deeplyNested = Array.from({ length: 10 }).reduce<unknown>(
+      (value) => ({ next: value }),
+      { token: 'tampoco-debe-aparecer' },
+    );
+    const redacted = redactSensitiveValue({ nested, deeplyNested });
+    const serialized = JSON.stringify(redacted);
+
+    expect(serialized).not.toContain('no-debe-aparecer');
+    expect(serialized).not.toContain('session=secreto');
+    expect(serialized).not.toContain('Bearer secreto');
+    expect(serialized).not.toContain('tampoco-debe-aparecer');
+    expect(serialized).toContain('[REDACTED_CIRCULAR_REFERENCE]');
+    expect(serialized).toContain('[REDACTED_DEPTH_LIMIT]');
+  });
 });

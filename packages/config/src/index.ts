@@ -3,6 +3,13 @@ import { resolve } from 'node:path';
 
 export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 
+const MAX_REDACTION_DEPTH = 8;
+const MAX_REDACTION_ARRAY_LENGTH = 100;
+const REDACTED_VALUE = '[REDACTED]';
+const REDACTION_DEPTH_LIMIT = '[REDACTED_DEPTH_LIMIT]';
+const REDACTION_CIRCULAR_REFERENCE = '[REDACTED_CIRCULAR_REFERENCE]';
+const REDACTION_TRUNCATED = '[REDACTED_TRUNCATED]';
+
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
 export interface AppConfig {
@@ -90,11 +97,77 @@ export function loadLocalEnvironmentFile(path?: string): void {
   }
 }
 
-export function redactSensitiveValue(value: unknown): unknown {
-  if (typeof value !== 'string') {
-    return value;
-  }
+function redactString(value: string): string {
   return value
     .replace(/postgres(?:ql)?:\/\/[^\s'"`]+/gi, '[REDACTED_DATABASE_URL]')
-    .replace(/([a-z0-9_]*(?:password|secret|token|database_url)[a-z0-9_]*)=([^\s&]+)/gi, '$1=[REDACTED]');
+    .replace(/([a-z0-9_]*(?:password|secret|token|database_url)[a-z0-9_]*)=([^\s&]+)/gi, '$1=[REDACTED]')
+    .replace(/\b(authorization|cookie|set-cookie)\s*:\s*[^\r\n]+/gi, '$1: [REDACTED]');
+}
+
+function isSensitiveKey(key: string): boolean {
+  return /(?:password|passwd|cookie|authorization|token|secret|api[_-]?key|database[_-]?url)/i.test(
+    key,
+  );
+}
+
+export function redactSensitiveValue(value: unknown): unknown {
+  return redactValue(value, 0, new WeakSet<object>());
+}
+
+function redactValue(value: unknown, depth: number, seen: WeakSet<object>): unknown {
+  if (typeof value === 'string') {
+    return redactString(value);
+  }
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'undefined') {
+    return undefined;
+  }
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+  if (typeof value === 'symbol' || typeof value === 'function') {
+    return REDACTED_VALUE;
+  }
+  if (depth >= MAX_REDACTION_DEPTH) {
+    return REDACTION_DEPTH_LIMIT;
+  }
+  if (seen.has(value)) {
+    return REDACTION_CIRCULAR_REFERENCE;
+  }
+
+  seen.add(value);
+  if (Array.isArray(value)) {
+    const values = value
+      .slice(0, MAX_REDACTION_ARRAY_LENGTH)
+      .map((entry) => redactValue(entry, depth + 1, seen));
+    if (value.length > MAX_REDACTION_ARRAY_LENGTH) {
+      values.push(REDACTION_TRUNCATED);
+    }
+    return values;
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: redactString(value.message),
+      ...(value.stack ? { stack: redactString(value.stack) } : {}),
+    };
+  }
+
+  try {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [
+        key,
+        isSensitiveKey(key) ? REDACTED_VALUE : redactValue(entry, depth + 1, seen),
+      ]),
+    );
+  } catch {
+    return REDACTED_VALUE;
+  }
 }
