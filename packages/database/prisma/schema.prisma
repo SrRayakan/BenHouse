@@ -7,5 +7,297 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// A2 establece únicamente la infraestructura de persistencia.
-// Los modelos de dominio empiezan en los bloques B–G según el Blueprint.
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DEACTIVATED
+}
+
+enum SessionRevocationReason {
+  LOGOUT
+  LOGOUT_ALL
+  PASSWORD_CHANGE
+  PASSWORD_RESET
+  USER_SUSPENDED
+  USER_DEACTIVATED
+  ADMIN_REVOKED
+  SECURITY_RESPONSE
+}
+
+enum AccountTokenPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+  ORGANIZATION_INVITATION
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum OrganizationMemberRole {
+  ADMIN
+  PROFESSIONAL_MEMBER
+}
+
+enum OrganizationMemberStatus {
+  ACTIVE
+  REVOKED
+  LEFT
+}
+
+enum OrganizationInvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  REVOKED
+  EXPIRED
+}
+
+enum AuthRateLimitAction {
+  REGISTER
+  LOGIN
+  SESSION_READ
+  FORGOT_PASSWORD
+  RESET_PASSWORD
+  VERIFY_EMAIL
+  RESEND_VERIFICATION
+  LOGOUT_ALL
+  CHANGE_PASSWORD
+  ORGANIZATION_INVITE
+  ORGANIZATION_INVITE_RESEND
+  ORGANIZATION_INVITATION_ACCEPT
+  ORGANIZATION_INVITATION_REJECT
+}
+
+enum AuthRateLimitDimension {
+  EMAIL
+  IP
+  EMAIL_IP
+  TOKEN
+  TOKEN_IP
+  ACTOR
+  ORGANIZATION
+  ACTOR_ORGANIZATION
+}
+
+enum AuditActorType {
+  USER
+  ANONYMOUS
+  SERVICE
+  SYSTEM
+}
+
+enum OutboxStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  OBSOLETE
+  DEAD_LETTER
+}
+
+model User {
+  id                   String                   @id @default(uuid()) @db.Uuid
+  email                String                   @unique(map: "user_email_uq") @db.VarChar(254)
+  displayName          String                   @map("display_name") @db.VarChar(120)
+  status               UserStatus               @default(ACTIVE)
+  emailVerifiedAt      DateTime?                @map("email_verified_at") @db.Timestamptz(3)
+  sessionVersion       Int                      @default(1) @map("session_version")
+  createdAt            DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+  passwordCredential   PasswordCredential?
+  sessions             Session[]
+  accountTokens        AccountToken[]
+  createdOrganizations Organization[]           @relation("OrganizationCreator")
+  organizationMembers  OrganizationMember[]
+  invitationsCreated   OrganizationInvitation[] @relation("InvitationCreator")
+  invitationsAccepted  OrganizationInvitation[] @relation("InvitationAcceptor")
+  auditEvents          AuditEvent[]             @relation("AuditActor")
+
+  @@map("user")
+}
+
+model PasswordCredential {
+  userId            String   @id @map("user_id") @db.Uuid
+  passwordHash      String   @map("password_hash") @db.VarChar(512)
+  passwordChangedAt DateTime @map("password_changed_at") @db.Timestamptz(3)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@map("password_credential")
+}
+
+model Session {
+  id                   String                   @id @default(uuid()) @db.Uuid
+  secretDigest         Bytes                    @unique(map: "session_secret_digest_uq") @map("secret_digest") @db.ByteA
+  secretKeyVersion     Int                      @map("secret_key_version") @db.SmallInt
+  userId               String                   @map("user_id") @db.Uuid
+  issuedSessionVersion Int                      @map("issued_session_version")
+  createdAt            DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastActivityAt       DateTime                 @map("last_activity_at") @db.Timestamptz(3)
+  idleExpiresAt        DateTime                 @map("idle_expires_at") @db.Timestamptz(3)
+  absoluteExpiresAt    DateTime                 @map("absolute_expires_at") @db.Timestamptz(3)
+  revokedAt            DateTime?                @map("revoked_at") @db.Timestamptz(3)
+  revocationReason     SessionRevocationReason? @map("revocation_reason")
+  user                 User                     @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([userId, revokedAt], map: "session_user_revoked_idx")
+  @@index([idleExpiresAt], map: "session_idle_expires_idx")
+  @@index([absoluteExpiresAt], map: "session_absolute_expires_idx")
+  @@map("session")
+}
+
+model AccountToken {
+  id                       String                  @id @default(uuid()) @db.Uuid
+  purpose                  AccountTokenPurpose
+  generation               Int
+  keyVersion               Int                     @map("key_version") @db.SmallInt
+  userId                   String?                 @map("user_id") @db.Uuid
+  organizationInvitationId String?                 @map("organization_invitation_id") @db.Uuid
+  createdAt                DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt                DateTime                @map("expires_at") @db.Timestamptz(3)
+  consumedAt               DateTime?               @map("consumed_at") @db.Timestamptz(3)
+  revokedAt                DateTime?               @map("revoked_at") @db.Timestamptz(3)
+  revocationReasonCode     String?                 @map("revocation_reason_code") @db.VarChar(64)
+  user                     User?                   @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  organizationInvitation   OrganizationInvitation? @relation(fields: [organizationInvitationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  outboxEvents             OutboxEvent[]
+
+  @@index([expiresAt], map: "account_token_expires_idx")
+  @@map("account_token")
+}
+
+model Organization {
+  id              String                   @id @default(uuid()) @db.Uuid
+  name            String                   @db.VarChar(160)
+  status          OrganizationStatus       @default(ACTIVE)
+  createdByUserId String                   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+  createdBy       User                     @relation("OrganizationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  members         OrganizationMember[]
+  invitations     OrganizationInvitation[]
+
+  @@map("organization")
+}
+
+model OrganizationMember {
+  id              String                   @id @default(uuid()) @db.Uuid
+  organizationId  String                   @map("organization_id") @db.Uuid
+  userId          String                   @map("user_id") @db.Uuid
+  role            OrganizationMemberRole
+  status          OrganizationMemberStatus @default(ACTIVE)
+  invitationId    String?                  @map("invitation_id") @db.Uuid
+  joinedAt        DateTime                 @default(now()) @map("joined_at") @db.Timestamptz(3)
+  endedAt         DateTime?                @map("ended_at") @db.Timestamptz(3)
+  endedReasonCode String?                  @map("ended_reason_code") @db.VarChar(64)
+  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organization    Organization             @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  user            User                     @relation(fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  invitation      OrganizationInvitation?  @relation(fields: [invitationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([organizationId, status, role], map: "organization_member_org_status_role_idx")
+  @@index([userId, status], map: "organization_member_user_status_idx")
+  @@index([organizationId, userId, createdAt(sort: Desc)], map: "organization_member_history_idx")
+  @@map("organization_member")
+}
+
+model OrganizationInvitation {
+  id               String                       @id @default(uuid()) @db.Uuid
+  organizationId   String                       @map("organization_id") @db.Uuid
+  email            String                       @db.VarChar(254)
+  role             OrganizationMemberRole
+  status           OrganizationInvitationStatus @default(PENDING)
+  invitedByUserId  String                       @map("invited_by_user_id") @db.Uuid
+  acceptedByUserId String?                      @map("accepted_by_user_id") @db.Uuid
+  createdAt        DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt        DateTime                     @map("expires_at") @db.Timestamptz(3)
+  respondedAt      DateTime?                    @map("responded_at") @db.Timestamptz(3)
+  revokedAt        DateTime?                    @map("revoked_at") @db.Timestamptz(3)
+  updatedAt        DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organization     Organization                 @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  invitedBy        User                         @relation("InvitationCreator", fields: [invitedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  acceptedBy       User?                        @relation("InvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  accountTokens    AccountToken[]
+  memberships      OrganizationMember[]
+
+  @@index([organizationId, status, expiresAt], map: "organization_invitation_org_status_expiry_idx")
+  @@index([email, status], map: "organization_invitation_email_status_idx")
+  @@map("organization_invitation")
+}
+
+model AuthRateLimit {
+  id              String                 @id @default(uuid()) @db.Uuid
+  action          AuthRateLimitAction
+  dimension       AuthRateLimitDimension
+  subjectDigest   Bytes                  @map("subject_digest") @db.ByteA
+  pepperVersion   Int                    @map("pepper_version") @db.SmallInt
+  windowStartedAt DateTime               @map("window_started_at") @db.Timestamptz(3)
+  windowEndsAt    DateTime               @map("window_ends_at") @db.Timestamptz(3)
+  attemptCount    Int                    @default(0) @map("attempt_count")
+  blockedUntil    DateTime?              @map("blocked_until") @db.Timestamptz(3)
+  expiresAt       DateTime               @map("expires_at") @db.Timestamptz(3)
+  updatedAt       DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([action, dimension, subjectDigest, pepperVersion], map: "auth_rate_limit_subject_uq")
+  @@index([expiresAt], map: "auth_rate_limit_expires_idx")
+  @@index([action, dimension, blockedUntil], map: "auth_rate_limit_blocked_idx")
+  @@index([subjectDigest, pepperVersion], map: "auth_rate_limit_digest_idx")
+  @@map("auth_rate_limit")
+}
+
+model AuditEvent {
+  id            String         @id @default(uuid()) @db.Uuid
+  actorType     AuditActorType @map("actor_type")
+  actorUserId   String?        @map("actor_user_id") @db.Uuid
+  action        String         @db.VarChar(80)
+  resourceType  String         @map("resource_type") @db.VarChar(60)
+  resourceId    String?        @map("resource_id") @db.Uuid
+  previousState String?        @map("previous_state") @db.VarChar(40)
+  newState      String?        @map("new_state") @db.VarChar(40)
+  reasonCode    String?        @map("reason_code") @db.VarChar(64)
+  metadata      Json           @default("{}") @db.JsonB
+  requestId     String?        @map("request_id") @db.VarChar(128)
+  correlationId String?        @map("correlation_id") @db.VarChar(128)
+  occurredAt    DateTime       @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  actor         User?          @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([resourceType, resourceId, occurredAt(sort: Desc)], map: "audit_event_resource_idx")
+  @@index([actorUserId, occurredAt(sort: Desc)], map: "audit_event_actor_idx")
+  @@index([action, occurredAt(sort: Desc)], map: "audit_event_action_idx")
+  @@index([requestId], map: "audit_event_request_idx")
+  @@index([correlationId], map: "audit_event_correlation_idx")
+  @@map("audit_event")
+}
+
+model OutboxEvent {
+  id             String        @id @default(uuid()) @db.Uuid
+  eventType      String        @map("event_type") @db.VarChar(100)
+  eventVersion   Int           @default(1) @map("event_version") @db.SmallInt
+  aggregateType  String        @map("aggregate_type") @db.VarChar(60)
+  aggregateId    String        @map("aggregate_id") @db.Uuid
+  accountTokenId String?       @map("account_token_id") @db.Uuid
+  payload        Json          @default("{}") @db.JsonB
+  status         OutboxStatus  @default(PENDING)
+  occurredAt     DateTime      @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  availableAt    DateTime      @default(now()) @map("available_at") @db.Timestamptz(3)
+  attemptCount   Int           @default(0) @map("attempt_count")
+  lockedAt       DateTime?     @map("locked_at") @db.Timestamptz(3)
+  lockedUntil    DateTime?     @map("locked_until") @db.Timestamptz(3)
+  lockedBy       String?       @map("locked_by") @db.VarChar(100)
+  lockToken      String?       @map("lock_token") @db.Uuid
+  processedAt    DateTime?     @map("processed_at") @db.Timestamptz(3)
+  lastErrorCode  String?       @map("last_error_code") @db.VarChar(80)
+  correlationId  String?       @map("correlation_id") @db.VarChar(128)
+  causationId    String?       @map("causation_id") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  accountToken   AccountToken? @relation(fields: [accountTokenId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([status, availableAt, occurredAt], map: "outbox_event_claim_idx")
+  @@index([aggregateType, aggregateId, occurredAt], map: "outbox_event_aggregate_idx")
+  @@index([correlationId], map: "outbox_event_correlation_idx")
+  @@map("outbox_event")
+}
