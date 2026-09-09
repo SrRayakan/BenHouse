@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import {
   createPrismaClient,
+  type PrismaClient,
   verifyDatabaseConnection,
   verifyDatabaseInfrastructure,
   verifyPostgis,
@@ -9,6 +10,10 @@ import {
 @Injectable()
 export class DatabaseService implements OnModuleDestroy {
   private readonly client = createPrismaClient();
+
+  get prisma(): PrismaClient {
+    return this.client;
+  }
 
   async onModuleDestroy(): Promise<void> {
     await this.client.$disconnect();

@@ -68,8 +68,14 @@ describe('readiness de la API', () => {
     const timings: Timings = {};
     loadLocalEnvironmentFile();
     const config = readAppConfig();
-    app = await measure(timings, 'nest.create', () => NestFactory.create(AppModule, { logger: false }));
-    app.enableCors({ origin: [config.corsOrigin], methods: ['GET'], credentials: false });
+    app = await measure(timings, 'nest.create', () =>
+      NestFactory.create(AppModule, { logger: false }),
+    );
+    app.enableCors({
+      origin: [...config.corsAllowedOrigins],
+      methods: ['GET', 'POST', 'OPTIONS'],
+      credentials: true,
+    });
     await measure(timings, 'app.init', () => app!.init());
 
     const database = app.get(DatabaseService);
@@ -84,12 +90,12 @@ describe('readiness de la API', () => {
     }
 
     const response = await measure(timings, 'http.ready', () =>
-      getReady(address.port, config.corsOrigin),
+      getReady(address.port, config.auth.appOrigin),
     );
 
     try {
       expect(response.statusCode).toBe(200);
-      expect(response.cors).toBe(config.corsOrigin);
+      expect(response.cors).toBe(config.auth.appOrigin);
       expect(response.body).toEqual({
         status: 'ok',
         service: 'api',

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { createTestChildEnvironment } from './with-test-database.mjs';
+import {
+  createTestChildEnvironment,
+  verifyPhysicalDatabaseIsolation,
+} from './with-test-database.mjs';
 
 const validEnvironment = {
   NODE_ENV: 'development',
@@ -46,8 +49,7 @@ describe('with-test-database', () => {
       {
         ...validEnvironment,
         DATABASE_URL: 'postgresql://development-user:development-password@localhost/benhouse_test',
-        TEST_DATABASE_URL:
-          'postgresql://test-user:test-password@localhost:5432/benhouse_test',
+        TEST_DATABASE_URL: 'postgresql://test-user:test-password@localhost:5432/benhouse_test',
       },
     ],
     [
@@ -55,8 +57,7 @@ describe('with-test-database', () => {
       {
         ...validEnvironment,
         DATABASE_URL: 'postgres://development-user:development-password@localhost/benhouse_test',
-        TEST_DATABASE_URL:
-          'postgresql://test-user:test-password@localhost:5432/benhouse_test',
+        TEST_DATABASE_URL: 'postgresql://test-user:test-password@localhost:5432/benhouse_test',
       },
     ],
     ['URL malformada', { ...validEnvironment, TEST_DATABASE_URL: 'not-a-url' }],
@@ -64,7 +65,8 @@ describe('with-test-database', () => {
       'host fuera de política',
       {
         ...validEnvironment,
-        TEST_DATABASE_URL: 'postgresql://test-user:test-password@db.example.test:5432/benhouse_test',
+        TEST_DATABASE_URL:
+          'postgresql://test-user:test-password@db.example.test:5432/benhouse_test',
       },
     ],
     [
@@ -76,5 +78,33 @@ describe('with-test-database', () => {
     ],
   ])('rechaza %s sin ejecutar procesos ni conectar a PostgreSQL', (_reason, environment) => {
     expect(() => createTestChildEnvironment(environment)).toThrow();
+  });
+
+  it('acepta aliases de host cuando PostgreSQL confirma bases físicas distintas', async () => {
+    const identities = new Map([
+      [validEnvironment.DATABASE_URL, { systemIdentifier: 'cluster-a', databaseOid: '10' }],
+      [validEnvironment.TEST_DATABASE_URL, { systemIdentifier: 'cluster-a', databaseOid: '11' }],
+    ]);
+    await expect(
+      verifyPhysicalDatabaseIsolation(validEnvironment, async (url) => identities.get(url)),
+    ).resolves.toBeUndefined();
+  });
+
+  it('rechaza la misma base física aunque las URLs parezcan distintas', async () => {
+    await expect(
+      verifyPhysicalDatabaseIsolation(validEnvironment, async () => ({
+        systemIdentifier: 'cluster-a',
+        databaseOid: '10',
+      })),
+    ).rejects.toThrow('misma base física');
+  });
+
+  it('falla cerrado sin filtrar credenciales cuando no puede verificar identidad', async () => {
+    const error = await verifyPhysicalDatabaseIsolation(validEnvironment, async () => {
+      throw new Error(validEnvironment.DATABASE_URL);
+    }).catch((caught) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).not.toContain('development-password');
+    expect(error.message).not.toContain('postgresql://');
   });
 });

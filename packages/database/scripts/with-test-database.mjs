@@ -1,4 +1,5 @@
 import { execute, loadRootEnvironment } from './with-root-environment.mjs';
+import { PrismaClient } from '@prisma/client';
 
 const DEFAULT_ALLOWED_TEST_DATABASE_HOSTS = ['localhost', '127.0.0.1', '::1'];
 
@@ -28,16 +29,17 @@ function parsePostgresDestination(value, variableName) {
 
 function sameDestination(left, right) {
   return (
-    left.host === right.host &&
-    left.port === right.port &&
-    left.databaseName === right.databaseName
+    left.host === right.host && left.port === right.port && left.databaseName === right.databaseName
   );
 }
 
 function allowedTestDatabaseHosts(environment) {
   const configuredHosts = environment.TEST_DATABASE_ALLOWED_HOSTS;
   const hosts = configuredHosts
-    ? configuredHosts.split(',').map((host) => host.trim().toLowerCase()).filter(Boolean)
+    ? configuredHosts
+        .split(',')
+        .map((host) => host.trim().toLowerCase())
+        .filter(Boolean)
     : DEFAULT_ALLOWED_TEST_DATABASE_HOSTS;
 
   if (hosts.length === 0) {
@@ -54,7 +56,9 @@ export function createTestChildEnvironment(environment = process.env) {
   const databaseUrl = environment.DATABASE_URL;
   const testDatabaseUrl = environment.TEST_DATABASE_URL;
   if (!databaseUrl || !testDatabaseUrl) {
-    throw new Error('DATABASE_URL y TEST_DATABASE_URL son obligatorias para las pruebas de integración.');
+    throw new Error(
+      'DATABASE_URL y TEST_DATABASE_URL son obligatorias para las pruebas de integración.',
+    );
   }
 
   const developmentDestination = parsePostgresDestination(databaseUrl, 'DATABASE_URL');
@@ -80,6 +84,62 @@ export function createTestChildEnvironment(environment = process.env) {
   };
 }
 
+export async function verifyPhysicalDatabaseIsolation(
+  environment = process.env,
+  readIdentity = readDatabaseIdentity,
+) {
+  const databaseUrl = environment.DATABASE_URL;
+  const testDatabaseUrl = environment.TEST_DATABASE_URL;
+  if (!databaseUrl || !testDatabaseUrl) {
+    throw new Error(
+      'DATABASE_URL y TEST_DATABASE_URL son obligatorias para verificar el aislamiento.',
+    );
+  }
+
+  let development;
+  let test;
+  try {
+    [development, test] = await Promise.all([
+      readIdentity(databaseUrl),
+      readIdentity(testDatabaseUrl),
+    ]);
+  } catch {
+    throw new Error('No se pudo verificar de forma segura la identidad física de las bases.');
+  }
+  if (
+    !development?.systemIdentifier ||
+    !development?.databaseOid ||
+    !test?.systemIdentifier ||
+    !test?.databaseOid
+  ) {
+    throw new Error('PostgreSQL devolvió una identidad física incompleta.');
+  }
+  if (
+    development.systemIdentifier === test.systemIdentifier &&
+    development.databaseOid === test.databaseOid
+  ) {
+    throw new Error('TEST_DATABASE_URL resuelve a la misma base física que DATABASE_URL.');
+  }
+}
+
+async function readDatabaseIdentity(databaseUrl) {
+  const prisma = new PrismaClient({ datasourceUrl: databaseUrl });
+  try {
+    const rows = await prisma.$queryRawUnsafe(`
+      SELECT current_database() AS "databaseName",
+             database.oid::text AS "databaseOid",
+             control.system_identifier::text AS "systemIdentifier"
+      FROM pg_database AS database
+      CROSS JOIN pg_control_system() AS control
+      WHERE database.datname = current_database()
+    `);
+    if (!Array.isArray(rows) || rows.length !== 1) throw new Error('Identidad no disponible.');
+    return rows[0];
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 if (import.meta.main) {
   loadRootEnvironment();
   const childEnvironment = createTestChildEnvironment();
@@ -88,5 +148,6 @@ if (import.meta.main) {
     throw new Error('Debe indicarse un comando para ejecutar con TEST_DATABASE_URL.');
   }
 
+  await verifyPhysicalDatabaseIsolation(process.env);
   execute(command, arguments_, childEnvironment);
 }

@@ -1,5 +1,7 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import type { AppConfig } from '@benhouse/config';
 import { loadLocalEnvironmentFile, readAppConfig, redactSensitiveValue } from '@benhouse/config';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './common/http/global-http-exception.filter';
@@ -9,16 +11,28 @@ async function bootstrap(): Promise<void> {
   loadLocalEnvironmentFile();
   const config = readAppConfig();
   const logger = new StructuredLogger(config.logLevel);
-  const app = await NestFactory.create(AppModule, { logger });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    logger,
+    bodyParser: false,
+  });
 
+  configureApplication(app, config);
   app.enableShutdownHooks();
+  await app.listen(config.apiPort);
+}
+
+export function configureApplication(app: NestExpressApplication, config: AppConfig): void {
+  app.set('trust proxy', config.auth.trustProxyHops);
+  app.useBodyParser('json', { limit: '8kb', strict: true });
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
   app.enableCors({
-    origin: [config.corsOrigin],
-    methods: ['GET'],
-    credentials: false,
+    origin: (origin, callback) => {
+      callback(null, origin === undefined || config.corsAllowedOrigins.includes(origin));
+    },
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Request-ID'],
+    credentials: true,
   });
-  await app.listen(config.apiPort);
 }
 
 function getStartupErrorDetails(error: unknown): Record<string, unknown> {
@@ -41,14 +55,16 @@ function getStartupErrorDetails(error: unknown): Record<string, unknown> {
   };
 }
 
-void bootstrap().catch((error: unknown) => {
-  console.error(
-    JSON.stringify({
-      level: 'error',
-      service: 'api',
-      message: 'La API no ha podido arrancar.',
-      error: getStartupErrorDetails(error),
-    }),
-  );
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  void bootstrap().catch((error: unknown) => {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        service: 'api',
+        message: 'La API no ha podido arrancar.',
+        error: getStartupErrorDetails(error),
+      }),
+    );
+    process.exitCode = 1;
+  });
+}
