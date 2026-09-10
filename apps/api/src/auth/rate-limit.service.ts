@@ -9,8 +9,17 @@ import { ApiError, securityDependencyUnavailable } from './auth.errors';
 import type { Clock } from './clock';
 import { SystemClock } from './clock';
 
-type Action = 'REGISTER' | 'LOGIN' | 'VERIFY_EMAIL' | 'SESSION_READ';
-type Dimension = 'EMAIL' | 'IP' | 'EMAIL_IP' | 'TOKEN' | 'TOKEN_IP';
+type Action =
+  | 'REGISTER'
+  | 'LOGIN'
+  | 'VERIFY_EMAIL'
+  | 'SESSION_READ'
+  | 'RESEND_VERIFICATION'
+  | 'FORGOT_PASSWORD'
+  | 'RESET_PASSWORD'
+  | 'LOGOUT_ALL'
+  | 'CHANGE_PASSWORD';
+type Dimension = 'EMAIL' | 'IP' | 'EMAIL_IP' | 'TOKEN' | 'TOKEN_IP' | 'ACTOR';
 type RateSubject = {
   action: Action;
   dimension: Dimension;

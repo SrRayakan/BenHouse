@@ -23,6 +23,7 @@ import { canonicalizeEmail } from './email';
 import { exactObject, requiredString, validateDisplayName } from './input-validation';
 import { deriveCsrfToken } from './csrf';
 import { SystemClock } from './clock';
+import { isSerializationFailure, withSerializableRetry } from './serializable-transaction';
 
 type RegisterBody = { email: string; displayName: string; password: string };
 type LoginBody = { email: string; password: string };
@@ -172,84 +173,94 @@ export class AuthService {
     if (!parsed) throw invalidOrExpiredToken();
     const now = this.clock.now();
     try {
-      await this.database.prisma.$transaction(
-        async (tx) => {
-          await tx.$queryRaw(
-            Prisma.sql`SELECT "id" FROM "account_token" WHERE "id" = ${parsed.selector}::uuid FOR UPDATE`,
-          );
-          const token = await tx.accountToken.findUnique({ where: { id: parsed.selector } });
-          if (!token?.userId || token.purpose !== 'EMAIL_VERIFICATION')
-            throw invalidOrExpiredToken();
-          await tx.$queryRaw(
-            Prisma.sql`SELECT "id" FROM "user" WHERE "id" = ${token.userId}::uuid FOR UPDATE`,
-          );
-          const user = await tx.user.findUnique({ where: { id: token.userId } });
-          const latest = await tx.accountToken.findFirst({
-            where: { userId: token.userId, purpose: 'EMAIL_VERIFICATION' },
-            orderBy: { generation: 'desc' },
-            select: { generation: true },
-          });
-          const expected =
-            accountTokenAuthenticator(
-              {
-                id: token.id,
+      await withSerializableRetry(() =>
+        this.database.prisma.$transaction(
+          async (tx) => {
+            const candidate = await tx.accountToken.findUnique({
+              where: { id: parsed.selector },
+              select: { userId: true },
+            });
+            if (!candidate?.userId) throw invalidOrExpiredToken();
+            await tx.$queryRaw(
+              Prisma.sql`SELECT "id" FROM "user" WHERE "id" = ${candidate.userId}::uuid FOR UPDATE`,
+            );
+            await tx.$queryRaw(
+              Prisma.sql`SELECT "id" FROM "account_token" WHERE "id" = ${parsed.selector}::uuid FOR UPDATE`,
+            );
+            const token = await tx.accountToken.findUnique({ where: { id: parsed.selector } });
+            if (
+              !token?.userId ||
+              token.userId !== candidate.userId ||
+              token.purpose !== 'EMAIL_VERIFICATION'
+            )
+              throw invalidOrExpiredToken();
+            const user = await tx.user.findUnique({ where: { id: token.userId } });
+            const latest = await tx.accountToken.findFirst({
+              where: { userId: token.userId, purpose: 'EMAIL_VERIFICATION' },
+              orderBy: { generation: 'desc' },
+              select: { generation: true },
+            });
+            const expected =
+              accountTokenAuthenticator(
+                {
+                  id: token.id,
+                  purpose: 'EMAIL_VERIFICATION',
+                  generation: token.generation,
+                  subjectType: 'USER',
+                  subjectId: token.userId,
+                  keyVersion: token.keyVersion,
+                },
+                this.config.accountTokenKeys,
+              ) ?? Buffer.alloc(32);
+            const valid =
+              token.consumedAt === null &&
+              token.revokedAt === null &&
+              token.expiresAt > now &&
+              latest?.generation === token.generation &&
+              user?.status === 'ACTIVE' &&
+              user.emailVerifiedAt === null &&
+              expected.length === parsed.authenticator.length &&
+              timingSafeEqual(expected, parsed.authenticator);
+            if (!valid) throw invalidOrExpiredToken();
+            const consumed = await tx.accountToken.updateMany({
+              where: { id: token.id, consumedAt: null, revokedAt: null, expiresAt: { gt: now } },
+              data: { consumedAt: now },
+            });
+            const verified = await tx.user.updateMany({
+              where: { id: token.userId, status: 'ACTIVE', emailVerifiedAt: null },
+              data: { emailVerifiedAt: now },
+            });
+            if (consumed.count !== 1 || verified.count !== 1) throw invalidOrExpiredToken();
+            await tx.accountToken.updateMany({
+              where: {
+                userId: token.userId,
                 purpose: 'EMAIL_VERIFICATION',
-                generation: token.generation,
-                subjectType: 'USER',
-                subjectId: token.userId,
-                keyVersion: token.keyVersion,
+                generation: { lt: token.generation },
+                consumedAt: null,
+                revokedAt: null,
               },
-              this.config.accountTokenKeys,
-            ) ?? Buffer.alloc(32);
-          const valid =
-            token.consumedAt === null &&
-            token.revokedAt === null &&
-            token.expiresAt > now &&
-            latest?.generation === token.generation &&
-            user?.status === 'ACTIVE' &&
-            user.emailVerifiedAt === null &&
-            expected.length === parsed.authenticator.length &&
-            timingSafeEqual(expected, parsed.authenticator);
-          if (!valid) throw invalidOrExpiredToken();
-          const consumed = await tx.accountToken.updateMany({
-            where: { id: token.id, consumedAt: null, revokedAt: null, expiresAt: { gt: now } },
-            data: { consumedAt: now },
-          });
-          const verified = await tx.user.updateMany({
-            where: { id: token.userId, status: 'ACTIVE', emailVerifiedAt: null },
-            data: { emailVerifiedAt: now },
-          });
-          if (consumed.count !== 1 || verified.count !== 1) throw invalidOrExpiredToken();
-          await tx.accountToken.updateMany({
-            where: {
-              userId: token.userId,
-              purpose: 'EMAIL_VERIFICATION',
-              generation: { lt: token.generation },
-              consumedAt: null,
-              revokedAt: null,
-            },
-            data: { revokedAt: now, revocationReasonCode: 'SUPERSEDED' },
-          });
-          await tx.auditEvent.create({
-            data: {
-              actorType: 'ANONYMOUS',
-              action: 'EMAIL_VERIFIED',
-              resourceType: 'USER',
-              resourceId: token.userId,
-              previousState: 'ACTIVE_UNVERIFIED',
-              newState: 'ACTIVE_VERIFIED',
-              metadata: { purpose: 'EMAIL_VERIFICATION', generation: token.generation },
-              requestId,
-              correlationId: requestId,
-              occurredAt: now,
-            },
-          });
-        },
-        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+              data: { revokedAt: now, revocationReasonCode: 'SUPERSEDED' },
+            });
+            await tx.auditEvent.create({
+              data: {
+                actorType: 'ANONYMOUS',
+                action: 'EMAIL_VERIFIED',
+                resourceType: 'USER',
+                resourceId: token.userId,
+                previousState: 'ACTIVE_UNVERIFIED',
+                newState: 'ACTIVE_VERIFIED',
+                metadata: { purpose: 'EMAIL_VERIFICATION', generation: token.generation },
+                requestId,
+                correlationId: requestId,
+                occurredAt: now,
+              },
+            });
+          },
+          { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+        ),
       );
     } catch (error) {
       if (error instanceof ApiError) throw error;
-      if (isSerializationFailure(error)) throw invalidOrExpiredToken();
       throw securityDependencyUnavailable();
     }
   }
@@ -533,8 +544,4 @@ function isUserEmailUniqueConstraint(error: unknown): boolean {
   }
   const target = error.meta?.target;
   return Array.isArray(target) && target.includes('email');
-}
-
-function isSerializationFailure(error: unknown): boolean {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034';
 }

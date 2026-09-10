@@ -17,6 +17,15 @@ export const invalidRequest = (message = 'La solicitud no es válida.') =>
 export const invalidCredentials = () =>
   new ApiError(HttpStatus.UNAUTHORIZED, 'INVALID_CREDENTIALS', 'Las credenciales no son válidas.');
 
+export const authenticationRequired = () =>
+  new ApiError(HttpStatus.UNAUTHORIZED, 'AUTHENTICATION_REQUIRED', 'La sesión no es válida.');
+
+export const csrfRequired = () =>
+  new ApiError(HttpStatus.FORBIDDEN, 'CSRF_REQUIRED', 'El token CSRF es obligatorio.');
+
+export const csrfInvalid = () =>
+  new ApiError(HttpStatus.FORBIDDEN, 'CSRF_INVALID', 'El token CSRF no es válido.');
+
 export const invalidOrExpiredToken = () =>
   new ApiError(
     HttpStatus.BAD_REQUEST,

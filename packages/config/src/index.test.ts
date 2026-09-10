@@ -22,6 +22,7 @@ const validEnvironment = {
   AUTH_RATE_LIMIT_PEPPER_KEYS: '1:AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM',
   AUTH_RATE_LIMIT_CURRENT_PEPPER_VERSION: '1',
   EMAIL_VERIFICATION_TTL_SECONDS: '3600',
+  PASSWORD_RESET_TTL_SECONDS: '1800',
   ARGON2_MEMORY_KIB: '8192',
   ARGON2_PASSES: '2',
   ARGON2_PARALLELISM: '2',
@@ -35,6 +36,19 @@ const validEnvironment = {
   AUTH_RATE_LIMIT_VERIFY_EMAIL_TOKEN: '5:60:60',
   AUTH_RATE_LIMIT_VERIFY_EMAIL_IP: '10:60:60',
   AUTH_RATE_LIMIT_VERIFY_EMAIL_TOKEN_IP: '5:60:60',
+  AUTH_RATE_LIMIT_RESEND_VERIFICATION_EMAIL: '5:60:60',
+  AUTH_RATE_LIMIT_RESEND_VERIFICATION_IP: '10:60:60',
+  AUTH_RATE_LIMIT_RESEND_VERIFICATION_EMAIL_IP: '5:60:60',
+  AUTH_RATE_LIMIT_FORGOT_PASSWORD_EMAIL: '5:60:60',
+  AUTH_RATE_LIMIT_FORGOT_PASSWORD_IP: '10:60:60',
+  AUTH_RATE_LIMIT_FORGOT_PASSWORD_EMAIL_IP: '5:60:60',
+  AUTH_RATE_LIMIT_RESET_PASSWORD_TOKEN: '5:60:60',
+  AUTH_RATE_LIMIT_RESET_PASSWORD_IP: '10:60:60',
+  AUTH_RATE_LIMIT_RESET_PASSWORD_TOKEN_IP: '5:60:60',
+  AUTH_RATE_LIMIT_LOGOUT_ALL_ACTOR: '5:60:60',
+  AUTH_RATE_LIMIT_LOGOUT_ALL_IP: '10:60:60',
+  AUTH_RATE_LIMIT_CHANGE_PASSWORD_ACTOR: '5:60:60',
+  AUTH_RATE_LIMIT_CHANGE_PASSWORD_IP: '10:60:60',
   AUTH_RATE_LIMIT_SESSION_READ_IP: '60:60:60',
   AUTH_RATE_LIMIT_CLEANUP_INTERVAL_SECONDS: '300',
   AUTH_RATE_LIMIT_CLEANUP_BATCH_SIZE: '500',
@@ -64,6 +78,7 @@ describe('readAppConfig', () => {
       corsOrigin: 'http://localhost:3000',
       corsAllowedOrigins: ['http://localhost:3000', 'http://127.0.0.1:3000'],
       logLevel: 'info',
+      auth: { passwordResetTtlSeconds: 1800 },
     });
   });
 
@@ -103,6 +118,7 @@ describe('readAppConfig', () => {
     ['Argon2 débil', { ARGON2_MEMORY_KIB: '1024' }],
     ['rate limit cero', { AUTH_RATE_LIMIT_LOGIN_EMAIL: '0:60:60' }],
     ['proxy negativo', { TRUST_PROXY_HOPS: '-1' }],
+    ['TTL de reset inválido', { PASSWORD_RESET_TTL_SECONDS: '0' }],
   ])('falla rápido ante %s', (_case, invalid) => {
     expect(() => readAppConfig({ ...validEnvironment, ...invalid })).toThrow(ConfigurationError);
   });

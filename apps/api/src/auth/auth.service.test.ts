@@ -15,6 +15,19 @@ const policyNames: AuthRateLimitPolicyName[] = [
   'VERIFY_EMAIL_TOKEN',
   'VERIFY_EMAIL_IP',
   'VERIFY_EMAIL_TOKEN_IP',
+  'RESEND_VERIFICATION_EMAIL',
+  'RESEND_VERIFICATION_IP',
+  'RESEND_VERIFICATION_EMAIL_IP',
+  'FORGOT_PASSWORD_EMAIL',
+  'FORGOT_PASSWORD_IP',
+  'FORGOT_PASSWORD_EMAIL_IP',
+  'RESET_PASSWORD_TOKEN',
+  'RESET_PASSWORD_IP',
+  'RESET_PASSWORD_TOKEN_IP',
+  'LOGOUT_ALL_ACTOR',
+  'LOGOUT_ALL_IP',
+  'CHANGE_PASSWORD_ACTOR',
+  'CHANGE_PASSWORD_IP',
   'SESSION_READ_IP',
 ];
 const keyring = { currentVersion: 1, keys: new Map([[1, Buffer.alloc(32, 1)]]) };
@@ -31,6 +44,7 @@ const config: AuthConfig = {
   accountTokenKeys: keyring,
   rateLimitPepperKeys: keyring,
   emailVerificationTtlSeconds: 3600,
+  passwordResetTtlSeconds: 1800,
   argon2: { memoryKiB: 8192, passes: 2, parallelism: 2 },
   rateLimits: Object.fromEntries(policyNames.map((name) => [name, policy])) as Record<
     AuthRateLimitPolicyName,

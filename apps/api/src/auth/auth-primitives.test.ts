@@ -26,7 +26,7 @@ import {
 } from './session-token';
 import { deriveCsrfToken, verifyCsrfToken } from './csrf';
 import { canonicalizeIp } from './ip';
-import { cookieOptions } from './auth.controller';
+import { clearCookieOptions, cookieOptions } from './auth.controller';
 
 const argon: Argon2Config = { memoryKiB: 8192, passes: 2, parallelism: 2 };
 const keys = (currentVersion = 2): VersionedKeyring => ({
@@ -165,6 +165,16 @@ describe('primitivas B1.2', () => {
     ).toBe(false);
   });
 
+  it('separa criptográficamente los propósitos de verificación y reset', () => {
+    const userId = randomUUID();
+    const verification = createAccountTokenMaterial(userId, 1, keys(), 'EMAIL_VERIFICATION');
+    const reset = createAccountTokenMaterial(userId, 1, keys(), 'PASSWORD_RESET');
+    const parsedReset = parseAccountToken(reset.token)!;
+    expect(reset.material.purpose).toBe('PASSWORD_RESET');
+    expect(verifyAccountTokenAuthenticator(parsedReset, reset.material, keys())).toBe(true);
+    expect(verifyAccountTokenAuthenticator(parsedReset, verification.material, keys())).toBe(false);
+  });
+
   it('parsea cookie estricta y autentica selector, secreto y versión', () => {
     const token = createSessionToken();
     const parsed = parseSessionToken(token.value);
@@ -215,6 +225,7 @@ describe('primitivas B1.2', () => {
       accountTokenKeys: keys(),
       rateLimitPepperKeys: keys(),
       emailVerificationTtlSeconds: 3600,
+      passwordResetTtlSeconds: 1800,
       argon2: argon,
       rateLimits: {} as never,
       rateLimitCleanupIntervalSeconds: 300,
@@ -235,5 +246,13 @@ describe('primitivas B1.2', () => {
         sessionCookieSecure: false,
       }),
     ).toMatchObject({ secure: false });
+    expect(clearCookieOptions(base)).toEqual({
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 0,
+      expires: new Date(0),
+    });
   });
 });

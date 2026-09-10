@@ -47,6 +47,19 @@ export type AuthRateLimitPolicyName =
   | 'VERIFY_EMAIL_TOKEN'
   | 'VERIFY_EMAIL_IP'
   | 'VERIFY_EMAIL_TOKEN_IP'
+  | 'RESEND_VERIFICATION_EMAIL'
+  | 'RESEND_VERIFICATION_IP'
+  | 'RESEND_VERIFICATION_EMAIL_IP'
+  | 'FORGOT_PASSWORD_EMAIL'
+  | 'FORGOT_PASSWORD_IP'
+  | 'FORGOT_PASSWORD_EMAIL_IP'
+  | 'RESET_PASSWORD_TOKEN'
+  | 'RESET_PASSWORD_IP'
+  | 'RESET_PASSWORD_TOKEN_IP'
+  | 'LOGOUT_ALL_ACTOR'
+  | 'LOGOUT_ALL_IP'
+  | 'CHANGE_PASSWORD_ACTOR'
+  | 'CHANGE_PASSWORD_IP'
   | 'SESSION_READ_IP';
 
 export interface AuthConfig {
@@ -62,6 +75,7 @@ export interface AuthConfig {
   accountTokenKeys: VersionedKeyring;
   rateLimitPepperKeys: VersionedKeyring;
   emailVerificationTtlSeconds: number;
+  passwordResetTtlSeconds: number;
   argon2: Argon2Config;
   rateLimits: Readonly<Record<AuthRateLimitPolicyName, RateLimitPolicy>>;
   rateLimitCleanupIntervalSeconds: number;
@@ -256,6 +270,19 @@ export function readAppConfig(environment: NodeJS.ProcessEnv = process.env): App
     'VERIFY_EMAIL_TOKEN',
     'VERIFY_EMAIL_IP',
     'VERIFY_EMAIL_TOKEN_IP',
+    'RESEND_VERIFICATION_EMAIL',
+    'RESEND_VERIFICATION_IP',
+    'RESEND_VERIFICATION_EMAIL_IP',
+    'FORGOT_PASSWORD_EMAIL',
+    'FORGOT_PASSWORD_IP',
+    'FORGOT_PASSWORD_EMAIL_IP',
+    'RESET_PASSWORD_TOKEN',
+    'RESET_PASSWORD_IP',
+    'RESET_PASSWORD_TOKEN_IP',
+    'LOGOUT_ALL_ACTOR',
+    'LOGOUT_ALL_IP',
+    'CHANGE_PASSWORD_ACTOR',
+    'CHANGE_PASSWORD_IP',
     'SESSION_READ_IP',
   ];
   const rateLimits = Object.fromEntries(
@@ -314,6 +341,7 @@ export function readAppConfig(environment: NodeJS.ProcessEnv = process.env): App
         60,
         2_592_000,
       ),
+      passwordResetTtlSeconds: parseInteger(environment, 'PASSWORD_RESET_TTL_SECONDS', 60, 86_400),
       argon2,
       rateLimits: Object.freeze(rateLimits),
       rateLimitCleanupIntervalSeconds: parseInteger(

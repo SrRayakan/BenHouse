@@ -7,7 +7,7 @@ const EXTERNAL_PATTERN = /^v1\.([0-9a-f-]{36})\.([A-Za-z0-9_-]{43})$/;
 
 export interface AccountTokenMaterial {
   id: string;
-  purpose: 'EMAIL_VERIFICATION';
+  purpose: 'EMAIL_VERIFICATION' | 'PASSWORD_RESET';
   generation: number;
   subjectType: 'USER';
   subjectId: string;
@@ -23,10 +23,11 @@ export function createAccountTokenMaterial(
   userId: string,
   generation: number,
   keyring: VersionedKeyring,
+  purpose: AccountTokenMaterial['purpose'] = 'EMAIL_VERIFICATION',
 ): { material: AccountTokenMaterial; token: string } {
   const material: AccountTokenMaterial = {
     id: randomUUID(),
-    purpose: 'EMAIL_VERIFICATION',
+    purpose,
     generation,
     subjectType: 'USER',
     subjectId: userId.toLowerCase(),

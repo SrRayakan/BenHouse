@@ -8,6 +8,7 @@ import { SystemClock } from './clock';
 import { AUTH_CONFIG } from './auth.config';
 import type { AuthConfig } from '@benhouse/config';
 import { PASSWORD_ENGINE, PasswordEngine } from './password';
+import { AccountLifecycleService } from './account-lifecycle.service';
 
 @Module({
   controllers: [AuthController],
@@ -22,6 +23,7 @@ import { PASSWORD_ENGINE, PasswordEngine } from './password';
     OriginGuard,
     AuthRateLimitService,
     AuthService,
+    AccountLifecycleService,
   ],
 })
 export class AuthModule {}
