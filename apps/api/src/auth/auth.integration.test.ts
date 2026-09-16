@@ -310,7 +310,7 @@ describe('Identity Auth Core API y seguridad', () => {
     expect(login.status).toBe(200);
     expect(login.body).toMatchObject({
       authenticated: true,
-      capabilities: [],
+      capabilities: ['ORGANIZATION_CREATE'],
       user: { email, status: 'ACTIVE', emailVerified: true },
     });
     const setCookie = login.headers.get('set-cookie') ?? '';
@@ -327,7 +327,11 @@ describe('Identity Auth Core API y seguridad', () => {
     const second = await request('GET', '/auth/session', { cookie, origin: null });
     expect(first.status).toBe(200);
     expect(first.body).toEqual(second.body);
-    expect(first.body).toMatchObject({ authenticated: true, user: { email }, capabilities: [] });
+    expect(first.body).toMatchObject({
+      authenticated: true,
+      user: { email },
+      capabilities: ['ORGANIZATION_CREATE'],
+    });
   });
 
   it('verifica por HTTP un PHC estándar y neutraliza costes corruptos sin responder 500', async () => {

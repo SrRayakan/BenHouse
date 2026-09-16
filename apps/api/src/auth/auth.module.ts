@@ -9,6 +9,7 @@ import { AUTH_CONFIG } from './auth.config';
 import type { AuthConfig } from '@benhouse/config';
 import { PASSWORD_ENGINE, PasswordEngine } from './password';
 import { AccountLifecycleService } from './account-lifecycle.service';
+import { SessionAuthorizationService } from './session-authorization.service';
 
 @Module({
   controllers: [AuthController],
@@ -24,6 +25,8 @@ import { AccountLifecycleService } from './account-lifecycle.service';
     AuthRateLimitService,
     AuthService,
     AccountLifecycleService,
+    SessionAuthorizationService,
   ],
+  exports: [AUTH_CONFIG, OriginGuard, SessionAuthorizationService],
 })
 export class AuthModule {}

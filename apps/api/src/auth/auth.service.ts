@@ -24,13 +24,17 @@ import { exactObject, requiredString, validateDisplayName } from './input-valida
 import { deriveCsrfToken } from './csrf';
 import { SystemClock } from './clock';
 import { isSerializationFailure, withSerializableRetry } from './serializable-transaction';
+import {
+  globalCapabilities,
+  type GlobalCapability,
+} from '../authorization/organization-capabilities';
 
 type RegisterBody = { email: string; displayName: string; password: string };
 type LoginBody = { email: string; password: string };
 type SessionView = {
   authenticated: true;
   user: { id: string; email: string; displayName: string; status: 'ACTIVE'; emailVerified: true };
-  capabilities: [];
+  capabilities: readonly GlobalCapability[];
   session: { expiresAt: string };
   csrfToken: string;
 };
@@ -508,6 +512,7 @@ function sessionView(
     email: string;
     displayName: string;
     status: 'ACTIVE' | 'SUSPENDED' | 'DEACTIVATED';
+    emailVerifiedAt: Date | null;
   },
   sessionId: string,
   issuedSessionVersion: number,
@@ -524,7 +529,10 @@ function sessionView(
       status: 'ACTIVE',
       emailVerified: true,
     },
-    capabilities: [],
+    capabilities: globalCapabilities({
+      status: user.status,
+      emailVerifiedAt: user.emailVerifiedAt,
+    }),
     session: { expiresAt: expiresAt.toISOString() },
     csrfToken: deriveCsrfToken(sessionId, issuedSessionVersion, config.csrfKeys),
   };
