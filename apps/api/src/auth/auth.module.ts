@@ -27,6 +27,6 @@ import { SessionAuthorizationService } from './session-authorization.service';
     AccountLifecycleService,
     SessionAuthorizationService,
   ],
-  exports: [AUTH_CONFIG, OriginGuard, SessionAuthorizationService],
+  exports: [AUTH_CONFIG, OriginGuard, SessionAuthorizationService, AuthRateLimitService],
 })
 export class AuthModule {}

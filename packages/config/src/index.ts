@@ -1,4 +1,11 @@
 import { createHash } from 'node:crypto';
+export { canonicalizeEmail, isCanonicalUuid } from './canonical-identifiers';
+export {
+  invitationTokenAuthenticator,
+  serializeInvitationToken,
+  verifyInvitationToken,
+} from './invitation-token';
+export type { InvitationTokenClaims } from './invitation-token';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -60,7 +67,19 @@ export type AuthRateLimitPolicyName =
   | 'LOGOUT_ALL_IP'
   | 'CHANGE_PASSWORD_ACTOR'
   | 'CHANGE_PASSWORD_IP'
-  | 'SESSION_READ_IP';
+  | 'SESSION_READ_IP'
+  | 'ORGANIZATION_INVITE_ACTOR'
+  | 'ORGANIZATION_INVITE_ORGANIZATION'
+  | 'ORGANIZATION_INVITE_ACTOR_ORGANIZATION'
+  | 'ORGANIZATION_INVITE_RESEND_ACTOR'
+  | 'ORGANIZATION_INVITE_RESEND_ORGANIZATION'
+  | 'ORGANIZATION_INVITE_RESEND_ACTOR_ORGANIZATION'
+  | 'ORGANIZATION_INVITATION_ACCEPT_TOKEN'
+  | 'ORGANIZATION_INVITATION_ACCEPT_IP'
+  | 'ORGANIZATION_INVITATION_ACCEPT_TOKEN_IP'
+  | 'ORGANIZATION_INVITATION_REJECT_TOKEN'
+  | 'ORGANIZATION_INVITATION_REJECT_IP'
+  | 'ORGANIZATION_INVITATION_REJECT_TOKEN_IP';
 
 export interface AuthConfig {
   appOrigin: string;
@@ -284,6 +303,18 @@ export function readAppConfig(environment: NodeJS.ProcessEnv = process.env): App
     'CHANGE_PASSWORD_ACTOR',
     'CHANGE_PASSWORD_IP',
     'SESSION_READ_IP',
+    'ORGANIZATION_INVITE_ACTOR',
+    'ORGANIZATION_INVITE_ORGANIZATION',
+    'ORGANIZATION_INVITE_ACTOR_ORGANIZATION',
+    'ORGANIZATION_INVITE_RESEND_ACTOR',
+    'ORGANIZATION_INVITE_RESEND_ORGANIZATION',
+    'ORGANIZATION_INVITE_RESEND_ACTOR_ORGANIZATION',
+    'ORGANIZATION_INVITATION_ACCEPT_TOKEN',
+    'ORGANIZATION_INVITATION_ACCEPT_IP',
+    'ORGANIZATION_INVITATION_ACCEPT_TOKEN_IP',
+    'ORGANIZATION_INVITATION_REJECT_TOKEN',
+    'ORGANIZATION_INVITATION_REJECT_IP',
+    'ORGANIZATION_INVITATION_REJECT_TOKEN_IP',
   ];
   const rateLimits = Object.fromEntries(
     rateLimitNames.map((name) => [name, parseRateLimit(environment, name)]),

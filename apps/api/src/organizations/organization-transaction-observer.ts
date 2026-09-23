@@ -2,7 +2,18 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@benhouse/database';
 import type { Prisma as PrismaTypes } from '@benhouse/database';
 
-export type OrganizationTransactionOperation = 'ORGANIZATION_CREATE' | 'ORGANIZATION_UPDATE';
+export type OrganizationTransactionOperation =
+  | 'ORGANIZATION_CREATE'
+  | 'ORGANIZATION_UPDATE'
+  | 'ORGANIZATION_INVITE'
+  | 'ORGANIZATION_INVITE_RESEND'
+  | 'ORGANIZATION_INVITE_REVOKE'
+  | 'ORGANIZATION_INVITE_ACCEPT'
+  | 'ORGANIZATION_INVITE_REJECT'
+  | 'ORGANIZATION_MEMBER_ROLE'
+  | 'ORGANIZATION_MEMBER_REVOKE'
+  | 'ORGANIZATION_MEMBER_LEAVE'
+  | 'ORGANIZATION_ADMIN_TRANSFER';
 
 export type OrganizationTransactionStartedEvent = {
   requestId: string;

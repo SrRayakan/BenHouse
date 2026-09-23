@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
+import { serializeInvitationToken } from '@benhouse/config';
 import type { Argon2Config, VersionedKeyring } from '@benhouse/config';
 import { canonicalizeEmail } from './email';
 import { validateDisplayName } from './input-validation';
@@ -16,6 +17,7 @@ import { constantTimeEqual, hmacSha256, lengthPrefixed } from './crypto-encoding
 import {
   createAccountTokenMaterial,
   parseAccountToken,
+  serializeAccountToken,
   verifyAccountTokenAuthenticator,
 } from './account-token';
 import {
@@ -43,6 +45,23 @@ describe('primitivas B1.2', () => {
       'nombre+tag@xn--bcher-kva.example',
     );
     expect(canonicalizeEmail('a.b+tag@gmail.com')).toBe('a.b+tag@gmail.com');
+  });
+
+  it('la API serializa invitaciones exactamente como la primitiva compartida por el worker', () => {
+    const material = {
+      id: randomUUID(),
+      purpose: 'ORGANIZATION_INVITATION' as const,
+      generation: 3,
+      subjectType: 'ORGANIZATION_INVITATION' as const,
+      subjectId: randomUUID(),
+      organizationId: randomUUID(),
+      email: 'persona@xn--bcher-kva.example',
+      role: 'ADMIN' as const,
+      keyVersion: 2,
+    };
+    expect(serializeAccountToken(material, keys())).toBe(
+      serializeInvitationToken(material, keys()),
+    );
   });
 
   it.each([

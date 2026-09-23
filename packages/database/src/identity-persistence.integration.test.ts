@@ -862,7 +862,11 @@ describe('persistencia B1 Identity Core', () => {
             role: 'ADMIN',
           },
         });
-        expect(await tx.organizationMember.count()).toBe(2);
+        expect(
+          await tx.organizationMember.count({
+            where: { organizationId: organization.id, userId: user.id },
+          }),
+        ).toBe(2);
       });
 
       await expectDatabaseRejection(

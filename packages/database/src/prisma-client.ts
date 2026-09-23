@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 
-export function createPrismaClient(): PrismaClient {
-  return new PrismaClient();
+export function createPrismaClient(options?: { datasourceUrl: string }): PrismaClient {
+  return new PrismaClient(options);
 }
 
 export async function verifyDatabaseConnection(client: PrismaClient): Promise<void> {

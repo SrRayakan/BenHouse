@@ -18,8 +18,20 @@ type Action =
   | 'FORGOT_PASSWORD'
   | 'RESET_PASSWORD'
   | 'LOGOUT_ALL'
-  | 'CHANGE_PASSWORD';
-type Dimension = 'EMAIL' | 'IP' | 'EMAIL_IP' | 'TOKEN' | 'TOKEN_IP' | 'ACTOR';
+  | 'CHANGE_PASSWORD'
+  | 'ORGANIZATION_INVITE'
+  | 'ORGANIZATION_INVITE_RESEND'
+  | 'ORGANIZATION_INVITATION_ACCEPT'
+  | 'ORGANIZATION_INVITATION_REJECT';
+type Dimension =
+  | 'EMAIL'
+  | 'IP'
+  | 'EMAIL_IP'
+  | 'TOKEN'
+  | 'TOKEN_IP'
+  | 'ACTOR'
+  | 'ORGANIZATION'
+  | 'ACTOR_ORGANIZATION';
 type RateSubject = {
   action: Action;
   dimension: Dimension;
