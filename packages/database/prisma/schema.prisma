@@ -97,23 +97,80 @@ enum OutboxStatus {
   DEAD_LETTER
 }
 
+enum PropertyType {
+  APARTMENT
+  HOUSE
+  TOWNHOUSE
+  PENTHOUSE
+  DUPLEX
+  STUDIO
+  LAND
+  COMMERCIAL
+  OTHER
+}
+
+enum PropertyStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum PropertyAuthorizationType {
+  OWNER
+  MANAGER
+  PUBLISHER
+}
+
+enum PropertyAuthorizationStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+enum ListingTransactionType {
+  SALE
+  RENT
+}
+
+enum ListingRentalMode {
+  LONG_TERM
+  SEASONAL
+  VACATION
+  ROOM
+}
+
+enum ListingStatus {
+  DRAFT
+  UNDER_REVIEW
+  PUBLISHED
+  PAUSED
+  RESERVED
+  IN_OPERATION
+  CLOSED
+  REJECTED
+  WITHDRAWN
+}
+
 model User {
-  id                   String                   @id @default(uuid()) @db.Uuid
-  email                String                   @unique(map: "user_email_uq") @db.VarChar(254)
-  displayName          String                   @map("display_name") @db.VarChar(120)
-  status               UserStatus               @default(ACTIVE)
-  emailVerifiedAt      DateTime?                @map("email_verified_at") @db.Timestamptz(3)
-  sessionVersion       Int                      @default(1) @map("session_version")
-  createdAt            DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt            DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
-  passwordCredential   PasswordCredential?
-  sessions             Session[]
-  accountTokens        AccountToken[]
-  createdOrganizations Organization[]           @relation("OrganizationCreator")
-  organizationMembers  OrganizationMember[]
-  invitationsCreated   OrganizationInvitation[] @relation("InvitationCreator")
-  invitationsAccepted  OrganizationInvitation[] @relation("InvitationAcceptor")
-  auditEvents          AuditEvent[]             @relation("AuditActor")
+  id                            String                   @id @default(uuid()) @db.Uuid
+  email                         String                   @unique(map: "user_email_uq") @db.VarChar(254)
+  displayName                   String                   @map("display_name") @db.VarChar(120)
+  status                        UserStatus               @default(ACTIVE)
+  emailVerifiedAt               DateTime?                @map("email_verified_at") @db.Timestamptz(3)
+  sessionVersion                Int                      @default(1) @map("session_version")
+  createdAt                     DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                     DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+  passwordCredential            PasswordCredential?
+  sessions                      Session[]
+  accountTokens                 AccountToken[]
+  createdOrganizations          Organization[]           @relation("OrganizationCreator")
+  organizationMembers           OrganizationMember[]
+  invitationsCreated            OrganizationInvitation[] @relation("InvitationCreator")
+  invitationsAccepted           OrganizationInvitation[] @relation("InvitationAcceptor")
+  auditEvents                   AuditEvent[]             @relation("AuditActor")
+  propertyAuthorizations        PropertyAuthorization[]  @relation("PropertyAuthorizationUser")
+  propertyAuthorizationsGranted PropertyAuthorization[]  @relation("PropertyAuthorizationGrantor")
+  publishedListings             Listing[]                @relation("ListingPublisherUser")
+  responsibleListings           Listing[]                @relation("ListingResponsibleMember")
 
   @@map("user")
 }
@@ -170,17 +227,89 @@ model AccountToken {
 }
 
 model Organization {
-  id              String                   @id @default(uuid()) @db.Uuid
-  name            String                   @db.VarChar(160)
-  status          OrganizationStatus       @default(ACTIVE)
-  createdByUserId String                   @map("created_by_user_id") @db.Uuid
-  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt       DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
-  createdBy       User                     @relation("OrganizationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
-  members         OrganizationMember[]
-  invitations     OrganizationInvitation[]
+  id                     String                   @id @default(uuid()) @db.Uuid
+  name                   String                   @db.VarChar(160)
+  status                 OrganizationStatus       @default(ACTIVE)
+  createdByUserId        String                   @map("created_by_user_id") @db.Uuid
+  createdAt              DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+  createdBy              User                     @relation("OrganizationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  members                OrganizationMember[]
+  invitations            OrganizationInvitation[]
+  propertyAuthorizations PropertyAuthorization[]
+  publishedListings      Listing[]
 
   @@map("organization")
+}
+
+model Property {
+  id               String                  @id @default(uuid()) @db.Uuid
+  type             PropertyType
+  builtArea        Decimal?                @map("built_area") @db.Decimal(10, 2)
+  usableArea       Decimal?                @map("usable_area") @db.Decimal(10, 2)
+  rooms            Int?                    @db.SmallInt
+  bathrooms        Int?                    @db.SmallInt
+  floor            Int?                    @db.SmallInt
+  constructionYear Int?                    @map("construction_year") @db.SmallInt
+  status           PropertyStatus          @default(ACTIVE)
+  createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+  authorizations   PropertyAuthorization[]
+  listings         Listing[]
+
+  @@index([status, createdAt(sort: Desc), id], map: "property_status_created_idx")
+  @@map("property")
+}
+
+model PropertyAuthorization {
+  id                String                      @id @default(uuid()) @db.Uuid
+  propertyId        String                      @map("property_id") @db.Uuid
+  userId            String?                     @map("user_id") @db.Uuid
+  organizationId    String?                     @map("organization_id") @db.Uuid
+  authorizationType PropertyAuthorizationType   @map("authorization_type")
+  status            PropertyAuthorizationStatus @default(ACTIVE)
+  validFrom         DateTime                    @default(now()) @map("valid_from") @db.Timestamptz(3)
+  validUntil        DateTime?                   @map("valid_until") @db.Timestamptz(3)
+  grantedByUserId   String                      @map("granted_by_user_id") @db.Uuid
+  createdAt         DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  revokedAt         DateTime?                   @map("revoked_at") @db.Timestamptz(3)
+  property          Property                    @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  user              User?                       @relation("PropertyAuthorizationUser", fields: [userId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  organization      Organization?               @relation(fields: [organizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  grantedBy         User                        @relation("PropertyAuthorizationGrantor", fields: [grantedByUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([propertyId, status, validUntil], map: "property_authorization_property_status_idx")
+  @@index([userId, status, validUntil], map: "property_authorization_user_status_idx")
+  @@index([organizationId, status, validUntil], map: "property_authorization_org_status_idx")
+  @@map("property_authorization")
+}
+
+model Listing {
+  id                      String                 @id @default(uuid()) @db.Uuid
+  propertyId              String                 @map("property_id") @db.Uuid
+  publisherUserId         String?                @map("publisher_user_id") @db.Uuid
+  publisherOrganizationId String?                @map("publisher_organization_id") @db.Uuid
+  responsibleMemberUserId String?                @map("responsible_member_user_id") @db.Uuid
+  transactionType         ListingTransactionType @map("transaction_type")
+  rentalMode              ListingRentalMode?     @map("rental_mode")
+  price                   Decimal                @db.Decimal(18, 2)
+  currency                String                 @db.Char(3)
+  description             String                 @db.Text
+  availableFrom           DateTime?              @map("available_from") @db.Timestamptz(3)
+  availableUntil          DateTime?              @map("available_until") @db.Timestamptz(3)
+  status                  ListingStatus          @default(DRAFT)
+  createdAt               DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  property                Property               @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  publisherUser           User?                  @relation("ListingPublisherUser", fields: [publisherUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  publisherOrganization   Organization?          @relation(fields: [publisherOrganizationId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  responsibleMember       User?                  @relation("ListingResponsibleMember", fields: [responsibleMemberUserId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([propertyId, status, createdAt(sort: Desc), id], map: "listing_property_status_created_idx")
+  @@index([publisherUserId, status, createdAt(sort: Desc), id], map: "listing_publisher_user_idx")
+  @@index([publisherOrganizationId, status, createdAt(sort: Desc), id], map: "listing_publisher_org_idx")
+  @@map("listing")
 }
 
 model OrganizationMember {

@@ -127,6 +127,24 @@ const expectedPartialIndexes: PartialIndexDefinition[] = [
     directions: ['ASC'],
     predicate: 'lock_tokenisnotnull',
   },
+  {
+    name: 'property_authorization_active_org_uq',
+    table: 'property_authorization',
+    method: 'btree',
+    unique: true,
+    columns: ['property_id', 'organization_id', 'authorization_type'],
+    directions: ['ASC', 'ASC', 'ASC'],
+    predicate: "status='active'andorganization_idisnotnull",
+  },
+  {
+    name: 'property_authorization_active_user_uq',
+    table: 'property_authorization',
+    method: 'btree',
+    unique: true,
+    columns: ['property_id', 'user_id', 'authorization_type'],
+    directions: ['ASC', 'ASC', 'ASC'],
+    predicate: "status='active'anduser_idisnotnull",
+  },
 ];
 
 function normalizePredicate(predicate: string) {
@@ -938,7 +956,9 @@ describe('persistencia B1 Identity Core', () => {
           data: { status: 'REJECTED', respondedAt: new Date(first.createdAt.getTime() + 1) },
         });
         await createInvitation(tx, organization.id, creator.id, email);
-        expect(await tx.organizationInvitation.count()).toBe(2);
+        expect(
+          await tx.organizationInvitation.count({ where: { organizationId: organization.id } }),
+        ).toBe(2);
       });
 
       await expectDatabaseRejection(
@@ -1734,7 +1754,7 @@ describe('persistencia B1 Identity Core', () => {
       await assertExactPartialIndexes(client);
     });
 
-    it('confirma que las tres definiciones originales quedaron restauradas', async () => {
+    it('confirma que las definiciones originales quedaron restauradas', async () => {
       const constraints = await client.$queryRaw<Array<{ name: string; definition: string }>>`
         SELECT conname AS name, pg_get_constraintdef(oid, false) AS definition
         FROM pg_constraint

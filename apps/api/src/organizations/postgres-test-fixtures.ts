@@ -4,19 +4,57 @@ import type {
   OrganizationTransactionOperation,
   OrganizationTransactionStartedEvent,
 } from './organization-transaction-observer';
+import type {
+  MarketplaceTransactionOperation,
+  MarketplaceTransactionStartedEvent,
+} from '../marketplace/marketplace-transaction-observer';
+
+type TestTransactionOperation = OrganizationTransactionOperation | MarketplaceTransactionOperation;
+type TestTransactionStartedEvent =
+  OrganizationTransactionStartedEvent | MarketplaceTransactionStartedEvent;
 
 type ReceiptState = 'ISSUED' | 'CLAIMED' | 'CONSUMED' | 'INVALIDATED';
 type ReceiptRecord = { owner: TestOrganizationTransactionObserver; state: ReceiptState };
 const transactionReceipts = new WeakMap<object, ReceiptRecord>();
 
-export type ObservedOrganizationTransaction = Readonly<OrganizationTransactionStartedEvent> & {
+// Un trabajo puede fallar antes de emitir ready o mientras se espera otro recibo.
+// Observarlo inmediatamente evita rechazos huérfanos; wait propaga el primer fallo
+// sin convertirlo en un timeout de una señal que ya no podrá emitirse.
+export class CausalWorkScope {
+  private readonly work: Promise<unknown>[] = [];
+  private rejectFailure!: (error: unknown) => void;
+  private readonly failure = new Promise<never>((_resolve, reject) => {
+    this.rejectFailure = reject;
+  });
+
+  constructor() {
+    void this.failure.catch(() => undefined);
+  }
+
+  observe<T>(work: Promise<T>): Promise<T> {
+    this.work.push(work);
+    void work.catch(this.rejectFailure);
+    return work;
+  }
+
+  wait<T>(signal: Promise<T>): Promise<T> {
+    return Promise.race([signal, this.failure]);
+  }
+
+  waitForWork<T>(work: Promise<T>): Promise<T> {
+    return this.wait(this.observe(work));
+  }
+
+  async settle(): Promise<void> {
+    await Promise.allSettled(this.work);
+  }
+}
+
+export type ObservedOrganizationTransaction = Readonly<TestTransactionStartedEvent> & {
   readonly causalReceipt: true;
 };
 
-type TransactionWait = Omit<
-  OrganizationTransactionStartedEvent,
-  'backendPid' | 'virtualTransactionId'
-> & {
+type TransactionWait = Omit<TestTransactionStartedEvent, 'backendPid' | 'virtualTransactionId'> & {
   timeoutMs?: number;
 };
 
@@ -33,7 +71,7 @@ export class TestOrganizationTransactionObserver {
     }
   >();
 
-  transactionStarted(event: OrganizationTransactionStartedEvent): void {
+  transactionStarted(event: TestTransactionStartedEvent): void {
     const key = transactionKey(event);
     if (this.events.has(key)) throw new Error(`Evento transaccional duplicado: ${key}`);
     const waiter = this.waiters.get(key);
@@ -123,7 +161,7 @@ export type BlockedQueryExpectation = {
   applicationName: string;
   expectedQuery: string;
   requestId: string;
-  operation: OrganizationTransactionOperation;
+  operation: TestTransactionOperation;
   attempt: number;
   transaction: ObservedOrganizationTransaction;
   diagnosticRoute?: string;
@@ -292,7 +330,7 @@ function claimCausalTransaction(expected: BlockedQueryExpectation): ReceiptRecor
 
 function transactionKey(event: {
   requestId: string;
-  operation: OrganizationTransactionOperation;
+  operation: TestTransactionOperation;
   attempt: number;
 }): string {
   return `${event.requestId}:${event.operation}:${event.attempt}`;

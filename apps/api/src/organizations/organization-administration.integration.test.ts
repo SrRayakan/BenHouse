@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { loadLocalEnvironmentFile, readAppConfig } from '@benhouse/config';
@@ -17,6 +17,7 @@ import { deriveCsrfToken } from '../auth/csrf';
 import { serializeAccountToken } from '../auth/account-token';
 import {
   TestOrganizationTransactionObserver,
+  CausalWorkScope,
   waitForQueryBlockedBy,
   withAuditFailureFixture,
 } from './postgres-test-fixtures';
@@ -48,6 +49,8 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
     loadLocalEnvironmentFile();
     priorDatabaseUrl = process.env.DATABASE_URL;
     const apiUrl = new URL(process.env.DATABASE_URL!);
+    // Compose publica PostgreSQL en IPv4; localhost puede intentar primero ::1.
+    if (apiUrl.hostname === 'localhost') apiUrl.hostname = '127.0.0.1';
     apiUrl.searchParams.set('application_name', apiApplicationName);
     process.env.DATABASE_URL = apiUrl.toString();
     const config = readAppConfig();
@@ -69,6 +72,18 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
       Prisma.sql`SELECT current_database() AS name`,
     );
     expect(databaseIdentity[0]?.name).toBe('benhouse_test');
+    const reference = createPrismaClient({ datasourceUrl: priorDatabaseUrl! });
+    const identity = (client: ReturnType<typeof createPrismaClient>) => client.$queryRaw`
+      SELECT current_database() AS name, database.oid::text AS oid,
+             control.system_identifier::text AS system
+      FROM pg_database AS database CROSS JOIN pg_control_system() AS control
+      WHERE database.datname=current_database()
+    `;
+    try {
+      expect(await identity(database.prisma)).toEqual(await identity(reference));
+    } finally {
+      await reference.$disconnect();
+    }
     const address = app.getHttpServer().address();
     if (!address || typeof address === 'string') throw new Error('Puerto HTTP no disponible.');
     baseUrl = `http://127.0.0.1:${address.port}`;
@@ -274,43 +289,50 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
     let signalReady!: (pid: number) => void;
     const signal = new Promise<void>((resolve) => (release = resolve));
     const ready = new Promise<number>((resolve) => (signalReady = resolve));
-    const held = holder.$transaction(
-      async (tx) => {
-        const backend = await tx.$queryRaw<Array<{ pid: number }>>(
-          Prisma.sql`SELECT pg_backend_pid() AS pid`,
-        );
-        await options.block(tx);
-        signalReady(backend[0]!.pid);
-        await signal;
-        await options.mutate(tx);
-      },
-      { timeout: 10_000 },
+    const scope = new CausalWorkScope();
+    const held = scope.observe(
+      holder.$transaction(
+        async (tx) => {
+          const backend = await tx.$queryRaw<Array<{ pid: number }>>(
+            Prisma.sql`SELECT pg_backend_pid() AS pid`,
+          );
+          await options.block(tx);
+          signalReady(backend[0]!.pid);
+          await signal;
+          await options.mutate(tx);
+        },
+        { timeout: 10_000 },
+      ),
     );
     let pending: Promise<Response> | undefined;
     try {
-      const blockerPid = await ready;
-      const receipt = transactionObserver.waitFor({
-        requestId: options.requestId,
-        operation: options.operation,
-        attempt: 1,
-      });
-      pending = options.request();
-      const transaction = await receipt;
-      const blocked = await waitForQueryBlockedBy(inspector, {
-        blockerPid,
-        databaseName: 'benhouse_test',
-        applicationName: apiApplicationName,
-        expectedQuery: options.expectedQuery,
-        requestId: options.requestId,
-        operation: options.operation,
-        attempt: 1,
-        transaction,
-        diagnosticRoute: 'B1.5',
-        allowedWaitEvents: ['transactionid', 'tuple'],
-        expectedBlockedPid: transaction.backendPid,
-        expectedVirtualTransactionId: transaction.virtualTransactionId,
-        timeoutMs: 2_000,
-      });
+      const blockerPid = await scope.wait(ready);
+      const receipt = scope.observe(
+        transactionObserver.waitFor({
+          requestId: options.requestId,
+          operation: options.operation,
+          attempt: 1,
+        }),
+      );
+      pending = scope.observe(options.request());
+      const transaction = await scope.wait(receipt);
+      const blocked = await scope.waitForWork(
+        waitForQueryBlockedBy(inspector, {
+          blockerPid,
+          databaseName: 'benhouse_test',
+          applicationName: apiApplicationName,
+          expectedQuery: options.expectedQuery,
+          requestId: options.requestId,
+          operation: options.operation,
+          attempt: 1,
+          transaction,
+          diagnosticRoute: 'B1.5',
+          allowedWaitEvents: ['transactionid', 'tuple'],
+          expectedBlockedPid: transaction.backendPid,
+          expectedVirtualTransactionId: transaction.virtualTransactionId,
+          timeoutMs: 2_000,
+        }),
+      );
       expect(blocked.blockingPids).toEqual([blockerPid]);
       release();
       await held;
@@ -319,8 +341,9 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
       release();
       await held.catch(() => undefined);
       await pending?.catch(() => undefined);
-      await Promise.all([holder.$disconnect(), inspector.$disconnect()]);
       transactionObserver.clearRequest(options.requestId);
+      await scope.settle();
+      await Promise.all([holder.$disconnect(), inspector.$disconnect()]);
       expect([
         transactionObserver.eventCount(options.requestId),
         transactionObserver.waiterCount(),
@@ -330,6 +353,7 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
   }
 
   async function causalTokenPair(options: {
+    holder?: ReturnType<typeof createPrismaClient>;
     tokenId?: string;
     hold?: (tx: Prisma.TransactionClient) => Promise<void>;
     first: {
@@ -345,76 +369,87 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
       run: () => Promise<Response>;
     };
   }): Promise<[Response, Response]> {
-    const holder = namedClient(`b15_token_holder_${randomUUID()}`);
+    const holder = options.holder ?? namedClient(`b15_token_holder_${randomUUID()}`);
     const inspector = namedClient(`b15_token_inspector_${randomUUID()}`);
     let release!: () => void;
     let ready!: (pid: number) => void;
     const signal = new Promise<void>((resolve) => (release = resolve));
     const blockerReady = new Promise<number>((resolve) => (ready = resolve));
-    const held = holder.$transaction(
-      async (tx) => {
-        const backend = await tx.$queryRaw<Array<{ pid: number }>>(
-          Prisma.sql`SELECT pg_backend_pid() AS pid`,
-        );
-        if (options.hold) await options.hold(tx);
-        else if (options.tokenId)
-          await tx.$queryRaw(
-            Prisma.sql`SELECT "id" FROM "account_token" WHERE "id" = ${options.tokenId}::uuid FOR UPDATE`,
+    const scope = new CausalWorkScope();
+    const held = scope.observe(
+      holder.$transaction(
+        async (tx) => {
+          const backend = await tx.$queryRaw<Array<{ pid: number }>>(
+            Prisma.sql`SELECT pg_backend_pid() AS pid`,
           );
-        else throw new Error('Falta el lock causal inicial.');
-        ready(backend[0]!.pid);
-        await signal;
-      },
-      { timeout: 30_000 },
+          if (options.hold) await options.hold(tx);
+          else if (options.tokenId)
+            await tx.$queryRaw(
+              Prisma.sql`SELECT "id" FROM "account_token" WHERE "id" = ${options.tokenId}::uuid FOR UPDATE`,
+            );
+          else throw new Error('Falta el lock causal inicial.');
+          ready(backend[0]!.pid);
+          await signal;
+        },
+        { timeout: 30_000 },
+      ),
     );
     let first: Promise<Response> | undefined;
     let second: Promise<Response> | undefined;
     try {
-      const holderPid = await blockerReady;
-      const firstStarted = transactionObserver.waitFor({
-        requestId: options.first.requestId,
-        operation: options.first.operation,
-        attempt: 1,
-        timeoutMs: 10_000,
-      });
-      first = options.first.run();
-      const firstReceipt = await firstStarted;
-      await waitForQueryBlockedBy(inspector, {
-        blockerPid: holderPid,
-        databaseName: 'benhouse_test',
-        applicationName: apiApplicationName,
-        expectedQuery: options.first.query,
-        requestId: options.first.requestId,
-        operation: options.first.operation,
-        attempt: 1,
-        transaction: firstReceipt,
-        allowedWaitEvents: ['transactionid', 'tuple'],
-        expectedBlockedPid: firstReceipt.backendPid,
-        expectedVirtualTransactionId: firstReceipt.virtualTransactionId,
-        timeoutMs: 5_000,
-      });
-      const secondStarted = transactionObserver.waitFor({
-        requestId: options.second.requestId,
-        operation: options.second.operation,
-        attempt: 1,
-        timeoutMs: 10_000,
-      });
-      second = options.second.run();
-      const secondReceipt = await secondStarted;
-      await waitForQueryBlockedBy(inspector, {
-        blockerPid: firstReceipt.backendPid,
-        databaseName: 'benhouse_test',
-        applicationName: apiApplicationName,
-        expectedQuery: options.second.query,
-        requestId: options.second.requestId,
-        operation: options.second.operation,
-        attempt: 1,
-        transaction: secondReceipt,
-        allowedWaitEvents: ['transactionid', 'tuple'],
-        expectedBlockedPid: secondReceipt.backendPid,
-        expectedVirtualTransactionId: secondReceipt.virtualTransactionId,
-        timeoutMs: 5_000,
-      });
+      const holderPid = await scope.wait(blockerReady);
+      const firstStarted = scope.observe(
+        transactionObserver.waitFor({
+          requestId: options.first.requestId,
+          operation: options.first.operation,
+          attempt: 1,
+          timeoutMs: 10_000,
+        }),
+      );
+      first = scope.observe(options.first.run());
+      const firstReceipt = await scope.wait(firstStarted);
+      await scope.waitForWork(
+        waitForQueryBlockedBy(inspector, {
+          blockerPid: holderPid,
+          databaseName: 'benhouse_test',
+          applicationName: apiApplicationName,
+          expectedQuery: options.first.query,
+          requestId: options.first.requestId,
+          operation: options.first.operation,
+          attempt: 1,
+          transaction: firstReceipt,
+          allowedWaitEvents: ['transactionid', 'tuple'],
+          expectedBlockedPid: firstReceipt.backendPid,
+          expectedVirtualTransactionId: firstReceipt.virtualTransactionId,
+          timeoutMs: 5_000,
+        }),
+      );
+      const secondStarted = scope.observe(
+        transactionObserver.waitFor({
+          requestId: options.second.requestId,
+          operation: options.second.operation,
+          attempt: 1,
+          timeoutMs: 10_000,
+        }),
+      );
+      second = scope.observe(options.second.run());
+      const secondReceipt = await scope.wait(secondStarted);
+      await scope.waitForWork(
+        waitForQueryBlockedBy(inspector, {
+          blockerPid: firstReceipt.backendPid,
+          databaseName: 'benhouse_test',
+          applicationName: apiApplicationName,
+          expectedQuery: options.second.query,
+          requestId: options.second.requestId,
+          operation: options.second.operation,
+          attempt: 1,
+          transaction: secondReceipt,
+          allowedWaitEvents: ['transactionid', 'tuple'],
+          expectedBlockedPid: secondReceipt.backendPid,
+          expectedVirtualTransactionId: secondReceipt.virtualTransactionId,
+          timeoutMs: 5_000,
+        }),
+      );
       release();
       await held;
       return [await first, await second];
@@ -422,9 +457,14 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
       release();
       await held.catch(() => undefined);
       await Promise.all([first?.catch(() => undefined), second?.catch(() => undefined)]);
-      await Promise.all([holder.$disconnect(), inspector.$disconnect()]);
       transactionObserver.clearRequest(options.first.requestId);
       transactionObserver.clearRequest(options.second.requestId);
+      await scope.settle();
+      // Un holder inyectado es prestado: su propietario puede tener otra transacción viva.
+      await Promise.all([
+        ...(options.holder ? [] : [holder.$disconnect()]),
+        inspector.$disconnect(),
+      ]);
       expect([
         transactionObserver.eventCount(options.first.requestId),
         transactionObserver.eventCount(options.second.requestId),
@@ -433,6 +473,159 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
       ]).toEqual([0, 0, 0, 0]);
     }
   }
+
+  it.each([false, true])(
+    'propaga P2028 del holder y respeta su propietario (aserción fallida: %s)',
+    async (failAssertion) => {
+      const name = `b15_pool_probe_${randomUUID()}`;
+      const url = new URL(process.env.DATABASE_URL!);
+      url.searchParams.set('application_name', name);
+      url.searchParams.set('connection_limit', '1');
+      const holder = createPrismaClient({ datasourceUrl: url.toString() });
+      const disconnect = vi.spyOn(holder, '$disconnect');
+      const phases: string[] = [];
+      const errors: unknown[] = [];
+      let release!: () => void;
+      let ready!: (pid: number) => void;
+      const signal = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const entered = new Promise<number>((resolve) => {
+        ready = resolve;
+      });
+      let exhausted!: (error: unknown) => void;
+      const exhaustion = new Promise<unknown>((resolve) => {
+        exhausted = resolve;
+      });
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let busy: Promise<void> | undefined;
+      let result: Promise<{ kind: 'resolved' } | { kind: 'rejected'; error: unknown }> | undefined;
+      let backendPid: number | undefined;
+      try {
+        await holder.$connect();
+        busy = holder.$transaction(
+          async (tx) => {
+            const [backend] = await tx.$queryRaw<
+              Array<{ pid: number }>
+            >`SELECT pg_backend_pid() AS pid`;
+            ready(backend!.pid);
+            await signal;
+          },
+          { timeout: 10_000 },
+        );
+        const pid = await Promise.race([
+          entered,
+          busy.then(() => {
+            throw new Error('La sonda terminó antes de ready.');
+          }),
+        ]);
+        backendPid = pid;
+        phases.push('busy-ready');
+        const original = holder.$transaction.bind(holder);
+        const start = vi.spyOn(holder, '$transaction').mockImplementation((callback, options) => {
+          const pending = original(callback, { ...options, maxWait: 100 });
+          // Observación del rechazo real del motor; no simula SQL ni el error P2028.
+          void pending.catch(exhausted);
+          return pending;
+        });
+        const run = vi.fn(async (): Promise<Response> => ({
+          status: 204,
+          body: undefined,
+          retryAfter: null,
+        }));
+        result = causalTokenPair({
+          holder,
+          hold: async () => {
+            throw new Error('No debe adquirir otra conexión.');
+          },
+          first: {
+            requestId: 'pool-first',
+            operation: 'ORGANIZATION_ADMIN_TRANSFER',
+            query: '',
+            run,
+          },
+          second: {
+            requestId: 'pool-second',
+            operation: 'ORGANIZATION_MEMBER_REVOKE',
+            query: '',
+            run,
+          },
+        }).then(
+          () => ({ kind: 'resolved' as const }),
+          (error: unknown) => ({ kind: 'rejected' as const, error }),
+        );
+        const failure = await exhaustion;
+        expect(failure).toMatchObject({ code: 'P2028' });
+        phases.push('P2028-real');
+        const activity = await database.prisma.$queryRaw<
+          Array<{ pid: number; blockers: number[] }>
+        >`
+        SELECT pid, pg_blocking_pids(pid) AS blockers FROM pg_stat_activity
+        WHERE application_name=${name}
+      `;
+        expect(activity).toEqual([{ pid, blockers: [] }]);
+        // El plazo solo detecta una espera huérfana DESPUÉS del P2028 observado.
+        const outcome = await Promise.race([
+          result,
+          new Promise<{ kind: 'orphaned' }>((resolve) => {
+            timer = setTimeout(() => resolve({ kind: 'orphaned' }), 1_000);
+          }),
+        ]);
+        expect(outcome).toEqual({ kind: 'rejected', error: failure });
+        phases.push('helper-finished');
+        expect(disconnect).not.toHaveBeenCalled();
+        expect(run).not.toHaveBeenCalled();
+        expect(start).toHaveBeenCalledOnce();
+        expect([
+          transactionObserver.waiterCount(),
+          transactionObserver.activeReceiptCount(),
+        ]).toEqual([0, 0]);
+        if (failAssertion) expect(false, 'Aserción sintética posterior al P2028 real').toBe(true);
+      } catch (error) {
+        errors.push(error);
+      } finally {
+        if (timer) clearTimeout(timer);
+        phases.push('owner-release');
+        release?.();
+        // También se espera el helper si una aserción falló antes de consumir su resultado.
+        const settled = await Promise.allSettled([busy, result]);
+        for (const outcome of settled)
+          if (outcome.status === 'rejected') errors.push(outcome.reason);
+        phases.push('busy-finished');
+        try {
+          await holder.$disconnect();
+          phases.push('owner-disconnect');
+        } catch (error) {
+          errors.push(error);
+        }
+        expect(disconnect).toHaveBeenCalledOnce();
+        vi.restoreAllMocks();
+      }
+      expect(phases).toEqual([
+        'busy-ready',
+        'P2028-real',
+        'helper-finished',
+        'owner-release',
+        'busy-finished',
+        'owner-disconnect',
+      ]);
+      const [residual] = await database.prisma.$queryRaw<Array<{ clients: bigint; locks: bigint }>>`
+      SELECT (SELECT count(*) FROM pg_stat_activity WHERE application_name=${name}) AS clients,
+             (SELECT count(*) FROM pg_locks WHERE pid=${backendPid}) AS locks
+    `;
+      expect(residual).toEqual({ clients: 0n, locks: 0n });
+      if (failAssertion) {
+        expect(errors).toHaveLength(1);
+        expect(errors[0]).toBeInstanceOf(Error);
+        expect((errors[0] as Error).message).toContain(
+          'Aserción sintética posterior al P2028 real',
+        );
+      } else if (errors.length) {
+        throw new AggregateError(errors, 'Falló la sonda P2028 o su limpieza.');
+      }
+    },
+    15_000,
+  );
 
   it('crea invitación, acepta por token sin sesión, impide replay y administra la membership', async () => {
     const owner = await actor();
@@ -1683,65 +1876,238 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
     ).toBe(1);
   }, 30_000);
 
-  it('revalida destino revocado y organización suspendida bajo los locks', async () => {
-    const first = await actor();
-    const second = await actor();
-    const target = await actor();
-    const orgId = await organization(first);
-    await database.prisma.organizationMember.create({
-      data: {
-        organizationId: orgId,
-        userId: second.userId,
-        role: 'ADMIN',
-        status: 'ACTIVE',
-      },
+  it('abre dos transacciones reales sin esperar la resolución IPv6 de localhost', async () => {
+    const scope = new CausalWorkScope();
+    const pids: number[] = [];
+    let ready!: () => void;
+    let release!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      ready = resolve;
     });
-    const targetMember = await database.prisma.organizationMember.create({
-      data: {
-        organizationId: orgId,
-        userId: target.userId,
-        role: 'PROFESSIONAL_MEMBER',
-        status: 'ACTIVE',
-      },
+    const signal = new Promise<void>((resolve) => {
+      release = resolve;
     });
-    const race = await Promise.all([
-      request(
-        'POST',
-        `/organizations/${orgId}/transfer-administration`,
-        { targetMemberId: targetMember.id, retainCurrentAdmin: false },
-        first,
+    const transactions = [0, 1].map(() =>
+      scope.observe(
+        database.prisma.$transaction(async (tx) => {
+          const [row] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+          pids.push(row!.pid);
+          if (pids.length === 2) ready();
+          await signal;
+        }),
       ),
-      request('POST', `/organizations/${orgId}/members/${targetMember.id}/revoke`, {}, second),
-    ]);
-    expect(race.some(({ status }) => status === 204)).toBe(true);
-    expect(race.every(({ status }) => status === 204 || status === 404)).toBe(true);
-    expect(
-      await database.prisma.organizationMember.count({
-        where: {
+    );
+    try {
+      await scope.wait(entered);
+      expect(new Set(pids).size).toBe(2);
+    } finally {
+      release();
+      await scope.settle();
+    }
+    await Promise.all(transactions);
+    const [residual] = await database.prisma.$queryRaw<Array<{ transactions: bigint }>>`
+      SELECT count(*) AS transactions FROM pg_stat_activity
+      WHERE pid IN (${Prisma.join(pids)}) AND pid<>pg_backend_pid() AND xact_start IS NOT NULL
+    `;
+    expect(residual?.transactions).toBe(0n);
+  });
+
+  it.each(['transfer', 'revoke'] as const)(
+    'revalida destino revocado y organización suspendida bajo los locks: %s primero',
+    async (winner) => {
+      const first = await actor();
+      const second = await actor();
+      const target = await actor();
+      const orgId = await organization(first);
+      await database.prisma.organizationMember.create({
+        data: { organizationId: orgId, userId: second.userId, role: 'ADMIN', status: 'ACTIVE' },
+      });
+      const targetMember = await database.prisma.organizationMember.create({
+        data: {
           organizationId: orgId,
+          userId: target.userId,
+          role: 'PROFESSIONAL_MEMBER',
           status: 'ACTIVE',
-          role: 'ADMIN',
         },
-      }),
-    ).toBeGreaterThanOrEqual(1);
-    await database.prisma.organization.update({
-      where: { id: orgId },
-      data: { status: 'SUSPENDED' },
-    });
-    const before = await database.prisma.auditEvent.count({ where: { resourceId: orgId } });
-    expect((await request('POST', `/organizations/${orgId}/leave`, {}, second)).status).toBe(403);
-    expect(
-      (
-        await request(
-          'POST',
-          `/organizations/${orgId}/invitations`,
-          { email: `b15-${randomUUID().slice(0, 16)}@example.test`, role: 'ADMIN' },
-          second,
-        )
-      ).status,
-    ).toBe(403);
-    expect(await database.prisma.auditEvent.count({ where: { resourceId: orgId } })).toBe(before);
-  }, 30_000);
+      });
+      const transferId = `b15-${suite}-${randomUUID()}`;
+      const revokeId = `b15-${suite}-${randomUUID()}`;
+      const events: Record<string, unknown>[] = [];
+      const originalStarted = transactionObserver.transactionStarted.bind(transactionObserver);
+      const started = vi
+        .spyOn(transactionObserver, 'transactionStarted')
+        .mockImplementation((event) => {
+          events.push({
+            phase: 'transaction-started',
+            operation: event.operation,
+            attempt: event.attempt,
+            pid: event.backendPid,
+            virtualTransactionId: event.virtualTransactionId,
+          });
+          originalStarted(event);
+        });
+      // Observadores pass-through: no cambian resultados, espera máxima ni política de retry.
+      const originalTransaction = database.prisma.$transaction.bind(database.prisma);
+      const transactions = vi
+        .spyOn(database.prisma, '$transaction')
+        .mockImplementation((callback, options) => {
+          const pending = originalTransaction(callback, options);
+          void pending.catch((error: unknown) => {
+            const structured = error as { code?: string; meta?: { code?: string } };
+            events.push({
+              phase: 'transaction-rejected',
+              code: structured.code,
+              sqlState: structured.meta?.code,
+            });
+          });
+          return pending;
+        });
+      const completed = (operation: string) => (response: Response) => {
+        events.push({
+          phase: 'response',
+          operation,
+          status: response.status,
+          code: (response.body?.error as { code?: string } | undefined)?.code ?? null,
+        });
+        return response;
+      };
+      try {
+        const commands = {
+          transfer: {
+            requestId: transferId,
+            operation: 'ORGANIZATION_ADMIN_TRANSFER' as const,
+            run: () =>
+              request(
+                'POST',
+                `/organizations/${orgId}/transfer-administration`,
+                { targetMemberId: targetMember.id, retainCurrentAdmin: false },
+                first,
+                'http://localhost:3000',
+                transferId,
+              ).then(completed('transfer')),
+          },
+          revoke: {
+            requestId: revokeId,
+            operation: 'ORGANIZATION_MEMBER_REVOKE' as const,
+            run: () =>
+              request(
+                'POST',
+                `/organizations/${orgId}/members/${targetMember.id}/revoke`,
+                {},
+                second,
+                'http://localhost:3000',
+                revokeId,
+              ).then(completed('revoke')),
+          },
+        };
+        const follower = winner === 'transfer' ? 'revoke' : 'transfer';
+        // Dos bloqueos reales comprobados por PID y transacción virtual:
+        // holder -> ganador (Organization), ganador -> seguidor (User).
+        const [winningResponse, followingResponse] = await causalTokenPair({
+          hold: async (tx) => {
+            await tx.$queryRaw(
+              Prisma.sql`SELECT "id" FROM "organization" WHERE "id" = ${orgId}::uuid FOR UPDATE`,
+            );
+          },
+          first: {
+            ...commands[winner],
+            query: 'SELECT "id" FROM "organization" WHERE "id" = $1::uuid FOR UPDATE',
+          },
+          second: {
+            ...commands[follower],
+            query: 'SELECT "id" FROM "user" WHERE "id" = $1::uuid FOR UPDATE',
+          },
+        });
+        const members = await database.prisma.organizationMember.findMany({
+          where: { organizationId: orgId },
+          select: { userId: true, role: true, status: true },
+        });
+        const audits = await database.prisma.auditEvent.findMany({
+          where: { requestId: { in: [transferId, revokeId] } },
+          select: { action: true, requestId: true },
+          orderBy: { occurredAt: 'asc' },
+        });
+        const finalMembers = Object.fromEntries(
+          members.map(({ userId, ...member }) => [
+            userId === first.userId ? 'first' : userId === second.userId ? 'second' : 'target',
+            member,
+          ]),
+        );
+        const diagnostic = JSON.stringify({
+          winner,
+          events,
+          members: finalMembers,
+          audits: audits.map(({ action, requestId }) => ({
+            action,
+            operation: requestId === transferId ? 'transfer' : 'revoke',
+          })),
+        });
+        process.stdout.write(`B15_CAUSAL_RACE ${diagnostic}\n`);
+        expect([winningResponse.status, followingResponse.status], diagnostic).toEqual(
+          winner === 'transfer' ? [204, 204] : [204, 404],
+        );
+        expect(finalMembers, diagnostic).toEqual({
+          first: {
+            role: winner === 'transfer' ? 'PROFESSIONAL_MEMBER' : 'ADMIN',
+            status: 'ACTIVE',
+          },
+          second: { role: 'ADMIN', status: 'ACTIVE' },
+          target: {
+            role: winner === 'transfer' ? 'ADMIN' : 'PROFESSIONAL_MEMBER',
+            status: 'REVOKED',
+          },
+        });
+        expect(audits.filter(({ requestId }) => requestId === transferId)).toHaveLength(
+          winner === 'transfer' ? 1 : 0,
+        );
+        expect(audits.filter(({ requestId }) => requestId === revokeId)).toHaveLength(1);
+        expect(audits.map(({ action }) => action)).toEqual(
+          winner === 'transfer'
+            ? ['ORGANIZATION_ADMIN_TRANSFERRED', 'ORGANIZATION_MEMBER_REVOKED']
+            : ['ORGANIZATION_MEMBER_REVOKED'],
+        );
+        expect(
+          events.some(({ sqlState }) => sqlState === '40001'),
+          diagnostic,
+        ).toBe(true);
+        const attempts = events.filter(
+          (event) =>
+            event.phase === 'transaction-started' &&
+            event.operation === commands[follower].operation,
+        );
+        expect(
+          attempts.map(({ attempt }) => attempt),
+          diagnostic,
+        ).toEqual([1, 2]);
+        expect(attempts[0]!.virtualTransactionId).not.toBe(attempts[1]!.virtualTransactionId);
+        expect(
+          events.some(({ code }) => code === 'P2028'),
+          diagnostic,
+        ).toBe(false);
+      } finally {
+        started.mockRestore();
+        transactions.mockRestore();
+      }
+      await database.prisma.organization.update({
+        where: { id: orgId },
+        data: { status: 'SUSPENDED' },
+      });
+      const before = await database.prisma.auditEvent.count({ where: { resourceId: orgId } });
+      expect((await request('POST', `/organizations/${orgId}/leave`, {}, second)).status).toBe(403);
+      expect(
+        (
+          await request(
+            'POST',
+            `/organizations/${orgId}/invitations`,
+            { email: `b15-${randomUUID().slice(0, 16)}@example.test`, role: 'ADMIN' },
+            second,
+          )
+        ).status,
+      ).toBe(403);
+      expect(await database.prisma.auditEvent.count({ where: { resourceId: orgId } })).toBe(before);
+    },
+    30_000,
+  );
 
   it('revierte ambos roles si falla la auditoría de transferencia', async () => {
     const owner = await actor();

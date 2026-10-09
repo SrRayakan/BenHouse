@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   BlockedQueryBarrierError,
+  CausalWorkScope,
   matchingBlockedQueries,
   TestOrganizationTransactionObserver,
   waitForQueryBlockedBy,
@@ -21,6 +22,39 @@ const valid: BlockedQueryObservation = {
   blockingPids: [101],
 };
 const receiptOwners: TestOrganizationTransactionObserver[] = [];
+
+describe('propagación de fallos de trabajo causal', () => {
+  it('rechaza ready con el error original si el trabajo no llega a empezar', async () => {
+    const scope = new CausalWorkScope();
+    const error = new Error('Fallo de adquisición sintético');
+    scope.observe(Promise.reject(error));
+    await expect(scope.wait(new Promise<never>(() => undefined))).rejects.toBe(error);
+  });
+
+  it('propaga el fallo del holder después de ready mientras espera otro recibo', async () => {
+    const scope = new CausalWorkScope();
+    let fail!: (error: Error) => void;
+    scope.observe(
+      new Promise<void>((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
+    await expect(scope.wait(Promise.resolve(123))).resolves.toBe(123);
+    const error = new Error('Fallo del holder sintético');
+    const waiting = scope.wait(new Promise<never>(() => undefined));
+    fail(error);
+    await expect(waiting).rejects.toBe(error);
+  });
+
+  it('observa también el rechazo de una petición antes de su recibo y conserva el primer error', async () => {
+    const scope = new CausalWorkScope();
+    const error = new Error('Fallo de petición sintético');
+    scope.observe(Promise.reject(error));
+    await expect(scope.wait(new Promise<never>(() => undefined))).rejects.toBe(error);
+    scope.observe(Promise.reject(new Error('Fallo secundario sintético')));
+    await expect(scope.wait(new Promise<never>(() => undefined))).rejects.toBe(error);
+  });
+});
 afterEach(() => {
   for (const owner of receiptOwners.splice(0)) {
     owner.clearRequest('request-a');

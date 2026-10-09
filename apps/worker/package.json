@@ -11,7 +11,7 @@
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "test": "vitest run src --exclude '**/*.integration.test.ts' --pool=vmThreads --maxWorkers=1",
-    "test:integration": "node ../../packages/database/scripts/with-test-database.mjs vitest run --config vitest.integration.config.mts"
+    "test:integration": "node ../../packages/database/scripts/with-worker-test-database.mjs"
   },
   "dependencies": {
     "@benhouse/config": "workspace:*",
