@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { Test } from '@nestjs/testing';
+import { Test, type TestingModule } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { loadLocalEnvironmentFile, readAppConfig } from '@benhouse/config';
 import type { AuthConfig, AuthRateLimitPolicyName } from '@benhouse/config';
@@ -15,6 +15,7 @@ import { AuthRateLimitService } from '../auth/rate-limit.service';
 import { SystemClock } from '../auth/clock';
 import { deriveCsrfToken } from '../auth/csrf';
 import { serializeAccountToken } from '../auth/account-token';
+import { cleanupOrganizationAdministration } from './organization-administration-test-cleanup';
 import {
   TestOrganizationTransactionObserver,
   CausalWorkScope,
@@ -40,14 +41,18 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
   let cookieName: string;
   let priorDatabaseUrl: string | undefined;
   let transactionObserver: TestOrganizationTransactionObserver;
+  let moduleRef: TestingModule | undefined;
+  let reference: ReturnType<typeof createPrismaClient> | undefined;
   const suite = randomUUID();
   const apiApplicationName = `b15_api_${suite}`;
   const userIds: string[] = [];
   const organizationIds: string[] = [];
+  const requestIds = new Set<string>();
 
   beforeAll(async () => {
-    loadLocalEnvironmentFile();
     priorDatabaseUrl = process.env.DATABASE_URL;
+    loadLocalEnvironmentFile();
+    const referenceDatabaseUrl = process.env.DATABASE_URL!;
     const apiUrl = new URL(process.env.DATABASE_URL!);
     // Compose publica PostgreSQL en IPv4; localhost puede intentar primero ::1.
     if (apiUrl.hostname === 'localhost') apiUrl.hostname = '127.0.0.1';
@@ -56,10 +61,11 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
     const config = readAppConfig();
     cookieName = config.auth.sessionCookieName;
     transactionObserver = new TestOrganizationTransactionObserver();
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+    moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(OrganizationTransactionObserver)
       .useValue(transactionObserver)
       .compile();
+    database = moduleRef.get(DatabaseService);
     app = moduleRef.createNestApplication<NestExpressApplication>({
       logger: false,
       bodyParser: false,
@@ -67,72 +73,60 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
     configureApplication(app, config);
     app.set('trust proxy', 1);
     await app.listen(0, '127.0.0.1');
-    database = app.get(DatabaseService);
     const databaseIdentity = await database.prisma.$queryRaw<Array<{ name: string }>>(
       Prisma.sql`SELECT current_database() AS name`,
     );
     expect(databaseIdentity[0]?.name).toBe('benhouse_test');
-    const reference = createPrismaClient({ datasourceUrl: priorDatabaseUrl! });
+    reference = createPrismaClient({ datasourceUrl: referenceDatabaseUrl });
     const identity = (client: ReturnType<typeof createPrismaClient>) => client.$queryRaw`
       SELECT current_database() AS name, database.oid::text AS oid,
              control.system_identifier::text AS system
       FROM pg_database AS database CROSS JOIN pg_control_system() AS control
       WHERE database.datname=current_database()
     `;
-    try {
-      expect(await identity(database.prisma)).toEqual(await identity(reference));
-    } finally {
-      await reference.$disconnect();
-    }
+    expect(await identity(database.prisma)).toEqual(await identity(reference));
+    await reference.$disconnect();
+    reference = undefined;
     const address = app.getHttpServer().address();
     if (!address || typeof address === 'string') throw new Error('Puerto HTTP no disponible.');
     baseUrl = `http://127.0.0.1:${address.port}`;
   }, 30_000);
 
   afterAll(async () => {
-    if (database && organizationIds.length) {
-      const invitations = await database.prisma.organizationInvitation.findMany({
-        where: { organizationId: { in: organizationIds } },
-        select: { id: true },
-      });
-      const invitationIds = invitations.map(({ id }) => id);
-      const tokens = await database.prisma.accountToken.findMany({
-        where: { organizationInvitationId: { in: invitationIds } },
-        select: { id: true },
-      });
-      await database.prisma.outboxEvent.deleteMany({
-        where: { accountTokenId: { in: tokens.map(({ id }) => id) } },
-      });
-      await database.prisma.$transaction(async (tx) => {
-        await tx.$executeRawUnsafe(
-          'ALTER TABLE "audit_event" DISABLE TRIGGER "audit_event_append_only_trg"',
-        );
-        await tx.auditEvent.deleteMany({ where: { requestId: { startsWith: `b15-${suite}` } } });
-        await tx.$executeRawUnsafe(
-          'ALTER TABLE "audit_event" ENABLE TRIGGER "audit_event_append_only_trg"',
-        );
-      });
-      await database.prisma.accountToken.deleteMany({
-        where: { organizationInvitationId: { in: invitationIds } },
-      });
-      await database.prisma.organizationMember.deleteMany({
-        where: { organizationId: { in: organizationIds } },
-      });
-      await database.prisma.organizationInvitation.deleteMany({
-        where: { id: { in: invitationIds } },
-      });
-      await database.prisma.organization.deleteMany({ where: { id: { in: organizationIds } } });
-      await database.prisma.session.deleteMany({ where: { userId: { in: userIds } } });
-      await database.prisma.user.deleteMany({ where: { id: { in: userIds } } });
-    }
-    await app?.close();
-    expect([
-      transactionObserver.eventCount(),
-      transactionObserver.waiterCount(),
-      transactionObserver.activeReceiptCount(),
-    ]).toEqual([0, 0, 0]);
-    if (priorDatabaseUrl === undefined) delete process.env.DATABASE_URL;
-    else process.env.DATABASE_URL = priorDatabaseUrl;
+    // Vitest conserva por separado los fallos de beforeAll/it y este afterAll.
+    await cleanupOrganizationAdministration({
+      database: database?.prisma,
+      userIds,
+      organizationIds,
+      requestIds,
+      resources: [
+        {
+          name: 'aplicación o módulo parcial',
+          run: () => (app ? app.close() : moduleRef?.close()),
+        },
+        {
+          name: 'servidor HTTP tras fallo de cierre',
+          run: () => (app?.getHttpServer()?.listening ? app.getHttpAdapter().close() : undefined),
+        },
+        { name: 'cliente de datos', run: () => database?.disconnect() },
+        { name: 'cliente de referencia', run: () => reference?.$disconnect() },
+        {
+          name: 'observador transaccional',
+          run: () => {
+            if (!transactionObserver) return;
+            expect([
+              transactionObserver.eventCount(),
+              transactionObserver.waiterCount(),
+              transactionObserver.activeReceiptCount(),
+            ]).toEqual([0, 0, 0]);
+          },
+        },
+      ],
+      restoreDatabaseUrl: () => {
+        if (priorDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+        else process.env.DATABASE_URL = priorDatabaseUrl;
+      },
+    });
   }, 30_000);
 
   async function request(
@@ -144,6 +138,7 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
     requestId = `b15-${suite}-${randomUUID()}`,
     ip = `2001:db8:${suite.slice(0, 4)}:${suite.slice(4, 8)}::1`,
   ): Promise<Response> {
+    requestIds.add(requestId);
     const headers: Record<string, string> = {
       'x-request-id': requestId,
       'x-forwarded-for': ip,
