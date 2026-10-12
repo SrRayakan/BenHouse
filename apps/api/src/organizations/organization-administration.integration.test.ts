@@ -1,9 +1,10 @@
+import '../../test/verified-database.mjs';
 import 'reflect-metadata';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { loadLocalEnvironmentFile, readAppConfig } from '@benhouse/config';
+import { readAppConfig } from '@benhouse/config';
 import type { AuthConfig, AuthRateLimitPolicyName } from '@benhouse/config';
 import { createPrismaClient, Prisma } from '@benhouse/database';
 import { AppModule } from '../app.module';
@@ -51,7 +52,6 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
 
   beforeAll(async () => {
     priorDatabaseUrl = process.env.DATABASE_URL;
-    loadLocalEnvironmentFile();
     const referenceDatabaseUrl = process.env.DATABASE_URL!;
     const apiUrl = new URL(process.env.DATABASE_URL!);
     // Compose publica PostgreSQL en IPv4; localhost puede intentar primero ::1.
@@ -76,7 +76,7 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
     const databaseIdentity = await database.prisma.$queryRaw<Array<{ name: string }>>(
       Prisma.sql`SELECT current_database() AS name`,
     );
-    expect(databaseIdentity[0]?.name).toBe('benhouse_test');
+    expect(databaseIdentity[0]?.name).toBe(process.env.API_TEST_DATABASE_NAME);
     reference = createPrismaClient({ datasourceUrl: referenceDatabaseUrl });
     const identity = (client: ReturnType<typeof createPrismaClient>) => client.$queryRaw`
       SELECT current_database() AS name, database.oid::text AS oid,
@@ -314,7 +314,7 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
       const blocked = await scope.waitForWork(
         waitForQueryBlockedBy(inspector, {
           blockerPid,
-          databaseName: 'benhouse_test',
+          databaseName: process.env.API_TEST_DATABASE_NAME!,
           applicationName: apiApplicationName,
           expectedQuery: options.expectedQuery,
           requestId: options.requestId,
@@ -406,7 +406,7 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
       await scope.waitForWork(
         waitForQueryBlockedBy(inspector, {
           blockerPid: holderPid,
-          databaseName: 'benhouse_test',
+          databaseName: process.env.API_TEST_DATABASE_NAME!,
           applicationName: apiApplicationName,
           expectedQuery: options.first.query,
           requestId: options.first.requestId,
@@ -432,7 +432,7 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
       await scope.waitForWork(
         waitForQueryBlockedBy(inspector, {
           blockerPid: firstReceipt.backendPid,
-          databaseName: 'benhouse_test',
+          databaseName: process.env.API_TEST_DATABASE_NAME!,
           applicationName: apiApplicationName,
           expectedQuery: options.second.query,
           requestId: options.second.requestId,
@@ -1540,7 +1540,7 @@ describe('B1.5 Invitations & Membership Administration HTTP/PostgreSQL', () => {
 
   it('falla cerrado con 503 si PostgreSQL no está disponible para rate limiting público', async () => {
     const url = new URL(process.env.DATABASE_URL!);
-    expect(url.pathname).toBe('/benhouse_test');
+    expect(url.pathname).toBe(`/${process.env.API_TEST_DATABASE_NAME}`);
     url.port = '1';
     const unavailable = createPrismaClient({ datasourceUrl: url.toString() });
     const rateService = app.get(AuthRateLimitService);

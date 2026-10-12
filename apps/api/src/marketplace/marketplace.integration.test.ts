@@ -1,10 +1,11 @@
+import '../../test/verified-database.mjs';
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { NestFactory } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { loadLocalEnvironmentFile, readAppConfig } from '@benhouse/config';
+import { readAppConfig } from '@benhouse/config';
 import { createPrismaClient, Prisma } from '@benhouse/database';
 import type { PrismaClient } from '@benhouse/database';
 import { AppModule } from '../app.module';
@@ -40,7 +41,6 @@ describe('B1.6 Property & Draft Listing Core HTTP/PostgreSQL', () => {
   const organizationIds = new Set<string>();
 
   beforeAll(async () => {
-    loadLocalEnvironmentFile();
     priorDatabaseUrl = process.env.DATABASE_URL;
     const testUrl = process.env.TEST_DATABASE_URL;
     if (!testUrl) throw new Error('TEST_DATABASE_URL no disponible.');
@@ -64,7 +64,7 @@ describe('B1.6 Property & Draft Listing Core HTTP/PostgreSQL', () => {
       Prisma.sql`SELECT current_database() AS name`,
     );
     databaseName = identity[0]?.name ?? '';
-    expect(databaseName).toBe('benhouse_test');
+    expect(databaseName).toBe(process.env.API_TEST_DATABASE_NAME);
     const address = app.getHttpServer().address();
     if (!address || typeof address === 'string') throw new Error('Puerto de test no disponible.');
     baseUrl = `http://127.0.0.1:${address.port}`;
@@ -1161,7 +1161,7 @@ describe('B1.6 Property & Draft Listing Core HTTP/PostgreSQL', () => {
     const original = process.env.DATABASE_URL;
     let unavailableApp: NestExpressApplication | undefined;
     try {
-      process.env.DATABASE_URL = 'postgresql://invalid@127.0.0.1:1/benhouse_test?connect_timeout=1';
+      process.env.DATABASE_URL = `postgresql://invalid@127.0.0.1:1/${process.env.API_TEST_DATABASE_NAME}?connect_timeout=1`;
       const config = readAppConfig();
       unavailableApp = await NestFactory.create<NestExpressApplication>(AppModule, {
         logger: false,

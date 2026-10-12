@@ -429,8 +429,9 @@ Valida:
 
 Transición:
 
-DRAFT/UNDER_REVIEW
-→ PUBLISHED cuando corresponda.
+DRAFT → UNDER_REVIEW → PUBLISHED.
+
+Contrato C1 aprobado: `UNDER_REVIEW` es validación determinista del backend, no aprobación ni moderación humana. Nunca se publica directamente desde DRAFT. Esta transición corresponde a C1.3, posterior a Location Core.
 
 Eventos:
 
@@ -549,6 +550,8 @@ Acción explícita no destructiva para retirar bloqueo manual autorizado. Respet
 ---
 
 # 9. Locations
+
+C1.1 implementa únicamente el catálogo territorial de lectura y la asociación privada con Property. Contrato físico, rutas y permisos concretos: [C1 — Location Core](C1-LOCATION-CORE.md). Autocomplete, búsqueda completa y mapa quedan fuera de C1.1.
 
 ## GET /locations/search
 

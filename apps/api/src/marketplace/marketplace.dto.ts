@@ -1,6 +1,16 @@
 import type { MarketplaceCapability } from './marketplace.policy';
 import type { PropertyType, RentalMode } from './marketplace.input';
 
+export type LocationDto = {
+  id: string;
+  code: string;
+  name: string;
+  kind:
+    'COUNTRY' | 'AUTONOMOUS_COMMUNITY' | 'PROVINCE' | 'MUNICIPALITY' | 'DISTRICT' | 'NEIGHBORHOOD';
+  parentLocationId: string | null;
+  demoSynthetic: boolean;
+};
+
 export type PropertyDto = {
   id: string;
   type: PropertyType;

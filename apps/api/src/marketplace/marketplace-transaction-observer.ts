@@ -5,6 +5,7 @@ import type { Prisma as PrismaTypes } from '@benhouse/database';
 export type MarketplaceTransactionOperation =
   | 'PROPERTY_CREATE'
   | 'PROPERTY_UPDATE'
+  | 'PROPERTY_LOCATION_SET'
   | 'PROPERTY_AUTHORIZATION_GRANT'
   | 'PROPERTY_AUTHORIZATION_REVOKE'
   | 'LISTING_CREATE'

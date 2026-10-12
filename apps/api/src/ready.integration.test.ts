@@ -1,9 +1,10 @@
+import '../test/verified-database.mjs';
 import { afterEach, describe, expect, it } from 'vitest';
 import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
 import { request } from 'node:http';
 import { performance } from 'node:perf_hooks';
-import { loadLocalEnvironmentFile, readAppConfig } from '@benhouse/config';
+import { readAppConfig } from '@benhouse/config';
 import { AppModule } from './app.module';
 import { DatabaseService } from './infrastructure/database/database.service';
 
@@ -66,7 +67,6 @@ describe('readiness de la API', () => {
 
   it('expone /ready sin filtrar secretos y aplica CORS configurado', async () => {
     const timings: Timings = {};
-    loadLocalEnvironmentFile();
     const config = readAppConfig();
     app = await measure(timings, 'nest.create', () =>
       NestFactory.create(AppModule, { logger: false }),

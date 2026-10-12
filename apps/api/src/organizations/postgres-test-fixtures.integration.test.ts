@@ -1,3 +1,4 @@
+import '../../test/verified-database.mjs';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPrismaClient, Prisma, type PrismaClient } from '@benhouse/database';
@@ -21,7 +22,7 @@ describe('infraestructura PostgreSQL de pruebas B1.4', () => {
     const identity = await observer.$queryRaw<Array<{ databaseName: string }>>(
       Prisma.sql`SELECT current_database() AS "databaseName"`,
     );
-    expect(identity[0]?.databaseName).toBe('benhouse_test');
+    expect(identity[0]?.databaseName).toBe(process.env.API_TEST_DATABASE_NAME);
   });
 
   afterAll(async () => {
@@ -103,7 +104,7 @@ describe('infraestructura PostgreSQL de pruebas B1.4', () => {
       await expect(
         waitForQueryBlockedBy(observer, {
           blockerPid,
-          databaseName: 'benhouse_test',
+          databaseName: process.env.API_TEST_DATABASE_NAME!,
           applicationName,
           expectedQuery: 'SELECT "id" FROM "user" WHERE "id" = $1::uuid FOR UPDATE',
           requestId: 'no-http-request',
@@ -197,7 +198,7 @@ describe('infraestructura PostgreSQL de pruebas B1.4', () => {
       await expect(
         waitForQueryBlockedBy(observer, {
           blockerPid,
-          databaseName: 'benhouse_test',
+          databaseName: process.env.API_TEST_DATABASE_NAME!,
           applicationName: targetApplication,
           expectedQuery: 'SELECT pg_advisory_xact_lock($1)',
           requestId: 'advisory-negative',

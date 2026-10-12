@@ -242,22 +242,62 @@ model Organization {
   @@map("organization")
 }
 
+enum LocationKind {
+  COUNTRY
+  AUTONOMOUS_COMMUNITY
+  PROVINCE
+  MUNICIPALITY
+  DISTRICT
+  NEIGHBORHOOD
+}
+
+model Location {
+  id               String                               @id @default(uuid()) @db.Uuid
+  code             String                               @unique(map: "location_code_key") @db.VarChar(96)
+  name             String                               @db.VarChar(160)
+  kind             LocationKind
+  parentLocationId String?                              @map("parent_location_id") @db.Uuid
+  parentKind       LocationKind?                        @map("parent_kind")
+  centroid         Unsupported("geometry(Point,4326)")?
+  demoSynthetic    Boolean                              @default(false) @map("demo_synthetic")
+  createdAt        DateTime                             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime                             @updatedAt @map("updated_at") @db.Timestamptz(3)
+  parent           Location?                            @relation("LocationHierarchy", fields: [parentLocationId, parentKind], references: [id, kind], onDelete: Restrict, onUpdate: Restrict, map: "location_parent_fkey")
+  children         Location[]                           @relation("LocationHierarchy")
+  properties       Property[]
+
+  @@unique([id, kind], map: "location_id_kind_key")
+  @@index([parentLocationId, name, id], map: "location_parent_name_idx")
+  @@index([centroid], type: Gist, map: "location_centroid_idx")
+  @@map("location")
+}
+
 model Property {
-  id               String                  @id @default(uuid()) @db.Uuid
+  id               String                               @id @default(uuid()) @db.Uuid
   type             PropertyType
-  builtArea        Decimal?                @map("built_area") @db.Decimal(10, 2)
-  usableArea       Decimal?                @map("usable_area") @db.Decimal(10, 2)
-  rooms            Int?                    @db.SmallInt
-  bathrooms        Int?                    @db.SmallInt
-  floor            Int?                    @db.SmallInt
-  constructionYear Int?                    @map("construction_year") @db.SmallInt
-  status           PropertyStatus          @default(ACTIVE)
-  createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+  builtArea        Decimal?                             @map("built_area") @db.Decimal(10, 2)
+  usableArea       Decimal?                             @map("usable_area") @db.Decimal(10, 2)
+  rooms            Int?                                 @db.SmallInt
+  bathrooms        Int?                                 @db.SmallInt
+  floor            Int?                                 @db.SmallInt
+  constructionYear Int?                                 @map("construction_year") @db.SmallInt
+  locationId       String?                              @map("location_id") @db.Uuid
+  locationVersion  Int                                  @default(0) @map("location_version")
+  streetName       String?                              @map("street_name") @db.VarChar(160)
+  streetNumber     String?                              @map("street_number") @db.VarChar(24)
+  addressUnit      String?                              @map("address_unit") @db.VarChar(80)
+  postalCode       String?                              @map("postal_code") @db.VarChar(16)
+  locationPoint    Unsupported("geometry(Point,4326)")? @map("location_point")
+  location         Location?                            @relation(fields: [locationId], references: [id], onDelete: Restrict, onUpdate: Cascade, map: "property_location_fkey")
+  status           PropertyStatus                       @default(ACTIVE)
+  createdAt        DateTime                             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime                             @updatedAt @map("updated_at") @db.Timestamptz(3)
   authorizations   PropertyAuthorization[]
   listings         Listing[]
 
   @@index([status, createdAt(sort: Desc), id], map: "property_status_created_idx")
+  @@index([locationId], map: "property_location_idx")
+  @@index([locationPoint], type: Gist, map: "property_location_point_idx")
   @@map("property")
 }
 

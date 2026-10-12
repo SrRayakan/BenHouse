@@ -9,6 +9,8 @@ import {
   Patch,
   Post,
   Query,
+  Put,
+  Header,
   UseGuards,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
@@ -93,6 +95,41 @@ export class PropertiesController {
     return this.marketplace.grantAuthorization(
       parseUuid(id),
       parseAuthorizationGrant(body),
+      readCookie(cookie, this.config.sessionCookieName),
+      csrf,
+      safeRequestId(requestId),
+    );
+  }
+
+  @Get(':id/location')
+  @Header('Cache-Control', 'no-store')
+  location(
+    @Param('id') id: string,
+    @Query() query: unknown,
+    @Headers('cookie') cookie: string | undefined,
+  ) {
+    parseNoQuery(query);
+    return this.marketplace.getPropertyLocation(
+      parseUuid(id),
+      readCookie(cookie, this.config.sessionCookieName),
+    );
+  }
+
+  @Put(':id/location')
+  @UseGuards(OriginGuard)
+  @Header('Cache-Control', 'no-store')
+  setLocation(
+    @Param('id') id: string,
+    @Query() query: unknown,
+    @Body() body: unknown,
+    @Headers('cookie') cookie: string | undefined,
+    @Headers('x-csrf-token') csrf: string | undefined,
+    @Headers('x-request-id') requestId: string | undefined,
+  ) {
+    parseNoQuery(query);
+    return this.marketplace.setPropertyLocation(
+      parseUuid(id),
+      body,
       readCookie(cookie, this.config.sessionCookieName),
       csrf,
       safeRequestId(requestId),
@@ -232,6 +269,27 @@ export class ListingsController {
       csrf,
       safeRequestId(requestId),
     );
+  }
+}
+
+@Controller('locations')
+export class LocationsController {
+  constructor(private readonly marketplace: MarketplaceService) {}
+
+  @Get()
+  roots(@Query() query: unknown) {
+    return this.marketplace.listLocations(null, parsePagination(query));
+  }
+
+  @Get(':id/children')
+  children(@Param('id') id: string, @Query() query: unknown) {
+    return this.marketplace.listLocations(parseUuid(id), parsePagination(query));
+  }
+
+  @Get(':id')
+  get(@Param('id') id: string, @Query() query: unknown) {
+    parseNoQuery(query);
+    return this.marketplace.getLocation(parseUuid(id));
   }
 }
 

@@ -1,9 +1,10 @@
+import '../../test/verified-database.mjs';
 import 'reflect-metadata';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { loadLocalEnvironmentFile, readAppConfig } from '@benhouse/config';
+import { readAppConfig } from '@benhouse/config';
 import { AppModule } from '../app.module';
 import { configureApplication } from '../main';
 import { DatabaseService } from '../infrastructure/database/database.service';
@@ -21,7 +22,6 @@ describe('Identity Auth Core API y seguridad', () => {
   const password = 'Una contraseña robusta 🔐';
 
   beforeAll(async () => {
-    loadLocalEnvironmentFile();
     const config = readAppConfig();
     app = await NestFactory.create<NestExpressApplication>(AppModule, {
       logger: false,

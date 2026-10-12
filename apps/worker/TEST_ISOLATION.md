@@ -9,10 +9,13 @@ no protege frente a availableAt/leases que vencen después ni frente a nuevas fi
 Por eso la suite usa una base `benhouse_worker_<UUID>_test` exclusiva por ejecución.
 No reprograma, bloquea ni restaura eventos históricos de `benhouse_test`.
 
-El runner común valida host, sufijo y aislamiento físico antes de crear recursos.
-El wrapper verifica que la base nueva tiene OID diferente tanto de dev como de
-test compartida, aplica las migraciones versionadas y ejecuta Vitest a través del
-runner endurecido. Las fixtures comprueban nombre y OID antes de escribir.
+El runner común `with-ephemeral-test-database.mjs`, compartido con API, valida
+host, sufijo e identidades físicas antes de crear recursos. El wrapper verifica
+nombre, sistema PostgreSQL y OID de la base nueva frente a dev y test compartida,
+aplica las migraciones versionadas, revalida identidad y ejecuta Vitest con ambas
+variables de conexión apuntando a la base propia. Las fixtures comprueban nombre
+y OID antes de escribir. Se conserva `WORKER_SHARED_TEST_DATABASE_URL` únicamente
+para las sondas explícitas descritas abajo.
 Cada worker usa conexiones reales a esa misma base exclusiva; el SQL de selección,
 los locks, leases, transporte y confirmación son los de producción, sin mocks de
 Prisma, filtros por ID ni ramas productivas exclusivas para tests.

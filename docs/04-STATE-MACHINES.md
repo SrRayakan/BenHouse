@@ -77,6 +77,8 @@ No borrar retroactivamente:
 
 # 2. Listing
 
+Contrato C1 aprobado: `UNDER_REVIEW` significa validación determinista del backend, nunca moderación o aprobación humana. No se permite publicación directa desde `DRAFT`. La implementación de estas transiciones corresponde a C1.3; C1.1 no altera los estados actuales.
+
 Estados principales:
 
 - DRAFT

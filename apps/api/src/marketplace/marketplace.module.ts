@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
 import {
   ListingsController,
+  LocationsController,
   PropertiesController,
   PropertyAuthorizationsController,
 } from './marketplace.controller';
@@ -13,7 +14,12 @@ import {
 
 @Module({
   imports: [AuthModule],
-  controllers: [PropertiesController, PropertyAuthorizationsController, ListingsController],
+  controllers: [
+    PropertiesController,
+    PropertyAuthorizationsController,
+    ListingsController,
+    LocationsController,
+  ],
   providers: [
     MarketplaceService,
     { provide: MarketplaceTransactionObserver, useClass: DisabledMarketplaceTransactionObserver },

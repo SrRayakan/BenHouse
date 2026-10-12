@@ -1,10 +1,11 @@
+import '../../test/verified-database.mjs';
 import 'reflect-metadata';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { NestFactory } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
-import { loadLocalEnvironmentFile, readAppConfig } from '@benhouse/config';
+import { readAppConfig } from '@benhouse/config';
 import { AppModule } from '../app.module';
 import { configureApplication } from '../main';
 import { DatabaseService } from '../infrastructure/database/database.service';
@@ -35,7 +36,6 @@ describe('B1.4 Organization Core HTTP y PostgreSQL', () => {
   const apiApplicationName = `b14_api_${suite}`;
 
   beforeAll(async () => {
-    loadLocalEnvironmentFile();
     originalDatabaseUrl = process.env.DATABASE_URL;
     process.env.DATABASE_URL = databaseUrlForApplication(apiApplicationName, false);
     const config = readAppConfig();
@@ -56,7 +56,7 @@ describe('B1.4 Organization Core HTTP y PostgreSQL', () => {
       Prisma.sql`SELECT current_database() AS "databaseName"`,
     );
     databaseName = identity[0]?.databaseName ?? '';
-    expect(databaseName).toBe('benhouse_test');
+    expect(databaseName).toBe(process.env.API_TEST_DATABASE_NAME);
     const address = app.getHttpServer().address();
     if (!address || typeof address === 'string') throw new Error('Puerto de test no disponible.');
     baseUrl = `http://127.0.0.1:${address.port}`;
@@ -1289,7 +1289,7 @@ describe('B1.4 Organization Core HTTP y PostgreSQL', () => {
     const originalDatabaseUrl = process.env.DATABASE_URL;
     let unavailableApp: NestExpressApplication | undefined;
     try {
-      process.env.DATABASE_URL = 'postgresql://invalid@127.0.0.1:1/benhouse_test?connect_timeout=1';
+      process.env.DATABASE_URL = `postgresql://invalid@127.0.0.1:1/${process.env.API_TEST_DATABASE_NAME}?connect_timeout=1`;
       const config = readAppConfig();
       unavailableApp = await NestFactory.create<NestExpressApplication>(AppModule, {
         logger: false,
@@ -1459,7 +1459,7 @@ describe('B1.4 Organization Core HTTP y PostgreSQL', () => {
         const activity = await inspector.$queryRaw<
           Array<{ applicationName: string; state: string; waitEvent: string | null }>
         >(
-          Prisma.sql`SELECT application_name AS "applicationName", state, wait_event AS "waitEvent" FROM pg_stat_activity WHERE datname = 'benhouse_test'`,
+          Prisma.sql`SELECT application_name AS "applicationName", state, wait_event AS "waitEvent" FROM pg_stat_activity WHERE datname = ${process.env.API_TEST_DATABASE_NAME}`,
         );
         throw new Error(`Replay sin evento: ${JSON.stringify(activity)}`, { cause: error });
       }

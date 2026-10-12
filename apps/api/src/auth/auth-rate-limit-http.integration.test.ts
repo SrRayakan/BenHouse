@@ -1,10 +1,11 @@
+import '../../test/verified-database.mjs';
 import 'reflect-metadata';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Test } from '@nestjs/testing';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import type { AppConfig, AuthConfig } from '@benhouse/config';
-import { loadLocalEnvironmentFile, readAppConfig } from '@benhouse/config';
+import { readAppConfig } from '@benhouse/config';
 import { AppModule } from '../app.module';
 import { configureApplication } from '../main';
 import { DatabaseService } from '../infrastructure/database/database.service';
@@ -23,7 +24,6 @@ describe('rate limit HTTP y confianza de proxy B1.2', () => {
   const running: NestExpressApplication[] = [];
 
   beforeAll(() => {
-    loadLocalEnvironmentFile();
     baseConfig = readAppConfig();
   });
 

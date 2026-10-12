@@ -5,9 +5,15 @@ import { ApiError } from '../auth/auth.errors';
 import { SessionAuthorizationService } from '../auth/session-authorization.service';
 import { withSerializableRetry } from '../auth/serializable-transaction';
 import { DatabaseService } from '../infrastructure/database/database.service';
-import type { ListingDto, PropertyAuthorizationDto, PropertyDto } from './marketplace.dto';
+import type {
+  ListingDto,
+  PropertyAuthorizationDto,
+  PropertyDto,
+  LocationDto,
+} from './marketplace.dto';
 import type { ListingWrite, PropertyWrite } from './marketplace.input';
 import { validateRentalCombination } from './marketplace.input';
+import { parsePropertyLocation } from './location.input';
 import {
   capabilitiesForProperty,
   hasMarketplaceCapability,
@@ -168,6 +174,113 @@ export class MarketplaceService {
         requestId,
       );
       return propertyDto(updated, actor.userId, memberships, now);
+    });
+  }
+
+  async listLocations(parentId: string | null, pagination: Pagination): Promise<LocationDto[]> {
+    return this.read(async (tx) => {
+      if (
+        parentId &&
+        !(await tx.location.findUnique({ where: { id: parentId }, select: { id: true } }))
+      )
+        throw notFound();
+      return tx.location.findMany({
+        where: { parentLocationId: parentId },
+        select: locationSelect,
+        orderBy: [{ name: 'asc' }, { id: 'asc' }],
+        take: pagination.limit,
+        skip: pagination.offset,
+      });
+    });
+  }
+
+  async getLocation(id: string): Promise<LocationDto> {
+    return this.read(async (tx) => {
+      const location = await tx.location.findUnique({ where: { id }, select: locationSelect });
+      if (!location) throw notFound();
+      return location;
+    });
+  }
+
+  async getPropertyLocation(propertyId: string, cookie: string | undefined) {
+    const actor = await this.sessions.authenticate(cookie);
+    return this.read(async (tx) => {
+      await this.sessions.revalidate(tx, actor);
+      const now = await databaseNow(tx);
+      const property = await propertyWithAuthorizations(tx, propertyId);
+      const memberships = await activeMemberships(tx, actor.userId);
+      // La dirección exacta se reserva a quien puede gestionar el inmueble.
+      if (
+        !property ||
+        !hasMarketplaceCapability(
+          capabilitiesForProperty(actor.userId, property.authorizations, memberships, now),
+          'PROPERTY_EDIT',
+        )
+      )
+        throw notFound();
+      return privateLocationDto(tx, propertyId);
+    });
+  }
+
+  async setPropertyLocation(
+    propertyId: string,
+    input: unknown,
+    cookie: string | undefined,
+    csrf: string | undefined,
+    requestId: string,
+  ) {
+    const actor = await this.sessions.authenticate(cookie, csrf, true);
+    const value = parsePropertyLocation(input);
+    return this.mutate('PROPERTY_LOCATION_SET', requestId, async (tx) => {
+      await this.sessions.lockAndRevalidate(tx, actor, csrf, true);
+      const memberships = await lockActorOrganizations(tx, actor.userId);
+      await lockProperty(tx, propertyId);
+      await lockPropertyAuthorizations(tx, propertyId);
+      await this.sessions.revalidate(tx, actor, csrf, true);
+      const now = await databaseNow(tx);
+      await expireAuthorizations(tx, propertyId, now);
+      const property = await propertyWithAuthorizations(tx, propertyId);
+      if (
+        !property ||
+        !hasMarketplaceCapability(
+          capabilitiesForProperty(actor.userId, property.authorizations, memberships, now),
+          'PROPERTY_EDIT',
+        )
+      )
+        throw notFound();
+      if (property.status !== 'ACTIVE' || property.locationVersion !== value.expectedVersion)
+        throw conflict(
+          'La ubicación ha cambiado o el inmueble no está activo. Recarga el recurso.',
+        );
+      // FK + bloqueo compartido evitan borrar/cambiar la referencia entre validación y escritura.
+      const locations = await tx.$queryRaw<Array<{ id: string }>>(
+        Prisma.sql`SELECT "id" FROM "location" WHERE "id" = ${value.locationId}::uuid FOR KEY SHARE`,
+      );
+      if (!locations.length) throw notFound();
+      const point = value.coordinates
+        ? Prisma.sql`ST_SetSRID(ST_MakePoint(${value.coordinates.longitude}, ${value.coordinates.latitude}), 4326)`
+        : Prisma.sql`NULL::geometry`;
+      await tx.$executeRaw(Prisma.sql`
+        UPDATE "property" SET "location_id" = ${value.locationId}::uuid,
+          "location_version" = "location_version" + 1,
+          "street_name" = ${value.streetName}, "street_number" = ${value.streetNumber},
+          "address_unit" = ${value.addressUnit}, "postal_code" = ${value.postalCode},
+          "location_point" = ${point}, "updated_at" = ${now}
+        WHERE "id" = ${propertyId}::uuid
+      `);
+      await audit(
+        tx,
+        actor.userId,
+        'PROPERTY_LOCATION_SET',
+        'PROPERTY',
+        propertyId,
+        property.status,
+        property.status,
+        { locationVersion: value.expectedVersion + 1 },
+        now,
+        requestId,
+      );
+      return privateLocationDto(tx, propertyId);
     });
   }
 
@@ -526,6 +639,44 @@ export class MarketplaceService {
       throw dependencyUnavailable();
     }
   }
+}
+
+// Catálogo público: nunca incluye direcciones, puntos precisos de Property ni relaciones inversas.
+const locationSelect = {
+  id: true,
+  code: true,
+  name: true,
+  kind: true,
+  parentLocationId: true,
+  demoSynthetic: true,
+} as const;
+
+async function privateLocationDto(tx: Tx, propertyId: string) {
+  const rows = await tx.$queryRaw<
+    Array<{
+      propertyId: string;
+      locationId: string | null;
+      version: number;
+      streetName: string | null;
+      streetNumber: string | null;
+      addressUnit: string | null;
+      postalCode: string | null;
+      latitude: number | null;
+      longitude: number | null;
+    }>
+  >(Prisma.sql`
+    SELECT "id" AS "propertyId", "location_id" AS "locationId", "location_version" AS "version",
+      "street_name" AS "streetName", "street_number" AS "streetNumber", "address_unit" AS "addressUnit",
+      "postal_code" AS "postalCode", ST_Y("location_point") AS latitude, ST_X("location_point") AS longitude
+    FROM "property" WHERE "id" = ${propertyId}::uuid
+  `);
+  const row = rows[0];
+  if (!row) throw notFound();
+  const { latitude, longitude, ...fields } = row;
+  return {
+    ...fields,
+    coordinates: latitude === null || longitude === null ? null : { latitude, longitude },
+  };
 }
 
 function actorPropertyWhere(userId: string, now: Date): PrismaTypes.PropertyWhereInput {

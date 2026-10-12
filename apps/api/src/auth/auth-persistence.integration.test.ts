@@ -1,7 +1,8 @@
+import '../../test/verified-database.mjs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AuthConfig } from '@benhouse/config';
-import { loadLocalEnvironmentFile, readAppConfig } from '@benhouse/config';
+import { readAppConfig } from '@benhouse/config';
 import { createPrismaClient } from '@benhouse/database';
 import type { PrismaClient } from '@benhouse/database';
 import { DatabaseService } from '../infrastructure/database/database.service';
@@ -33,7 +34,6 @@ describe('persistencia funcional B1.2', () => {
   let config: AuthConfig;
 
   beforeAll(async () => {
-    loadLocalEnvironmentFile();
     config = readAppConfig().auth;
     client = createPrismaClient();
     await client.$connect();

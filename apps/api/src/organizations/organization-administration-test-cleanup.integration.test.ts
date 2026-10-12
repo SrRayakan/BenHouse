@@ -1,3 +1,4 @@
+import '../../test/verified-database.mjs';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createPrismaClient, type PrismaClient } from '@benhouse/database';
@@ -15,7 +16,7 @@ describe('limpieza B1.5 en PostgreSQL', () => {
     const rows = await database.$queryRaw<
       Array<{ name: string }>
     >`SELECT current_database() AS name`;
-    expect(rows[0]?.name).toBe('benhouse_test');
+    expect(rows[0]?.name).toBe(process.env.API_TEST_DATABASE_NAME);
   });
 
   afterAll(async () => {
