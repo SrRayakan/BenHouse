@@ -10,8 +10,8 @@ const environment = {
 function fixture(failures = []) {
   const fail = new Set(failures);
   const shared = { name: 'benhouse_test', oid: '2', system: '100' };
+  const databases = new Map();
   let name,
-    dropped = false,
     catalogReads = 0,
     adminReads = 0,
     childReads = 0;
@@ -21,18 +21,22 @@ function fixture(failures = []) {
         name = /^CREATE DATABASE "([a-z0-9_]+)" TEMPLATE template0$/.exec(sql)?.[1];
         expect(name).toMatch(/^benhouse_(api|worker)_[a-f0-9]{32}_test$/);
         if (fail.has('create')) throw new Error('driver-secret');
+        if (fail.has('second-create') && databases.size === 1) throw new Error('driver-secret');
+        databases.set(name, { oid: String(3 + databases.size), dropped: false });
       } else {
-        expect(sql).toBe(`DROP DATABASE "${name}"`);
+        const dropName = /^DROP DATABASE "([a-z0-9_]+)"$/.exec(sql)?.[1];
+        expect(databases.has(dropName)).toBe(true);
         if (fail.has('drop')) throw new Error('driver-secret');
-        dropped = true;
+        databases.get(dropName).dropped = true;
       }
     }),
     $queryRaw: vi.fn(async (_sql, requested) => {
-      expect(requested).toBe(name);
+      expect(databases.has(requested)).toBe(true);
       catalogReads++;
       if (fail.has('capture-oid') && catalogReads === 1) throw new Error('driver-secret');
-      if (dropped && !fail.has('drop-not-effective')) return [];
-      return [{ oid: fail.has('replaced-oid') && catalogReads > 1 ? '999' : '3' }];
+      const db = databases.get(requested);
+      if (db.dropped && !fail.has('drop-not-effective')) return [];
+      return [{ oid: fail.has('replaced-oid') && catalogReads > 1 ? '999' : db.oid }];
     }),
     $disconnect: vi.fn(async () => {
       if (fail.has('disconnect')) throw new Error('driver-secret');
@@ -61,13 +65,17 @@ function fixture(failures = []) {
       return {
         name: fail.has('wrong-name') ? 'benhouse_test' : databaseName,
         oid:
-          fail.has('wrong-oid') || (fail.has('post-migrate-oid') && childReads > 1) ? '999' : '3',
+          fail.has('wrong-oid') || (fail.has('post-migrate-oid') && childReads > 1)
+            ? '999'
+            : fail.has('foreign-alias-primary') && databases.size > 1
+              ? '3'
+              : databases.get(databaseName)?.oid,
         system: fail.has('wrong-system') ? '999' : '100',
       };
     }),
     run: vi.fn(async (command, args, child) => {
       expect(child.DATABASE_URL).toBe(child.TEST_DATABASE_URL);
-      expect(new URL(child.DATABASE_URL).pathname).toBe(`/${name}`);
+      expect(databases.has(new URL(child.DATABASE_URL).pathname.slice(1))).toBe(true);
       expect(child.NODE_ENV).toBe('test');
       if (
         (command === 'prisma' && fail.has('migrate')) ||
@@ -80,20 +88,69 @@ function fixture(failures = []) {
 }
 
 describe('runner efímero API/worker: sin fallback ni borrado ajeno', () => {
+  it.each(['localhost', '127.0.0.1'])(
+    'elige endpoint efímero sin alterar las referencias históricas: %s',
+    async (host) => {
+      const original = {
+        ...environment,
+        TEST_DATABASE_URL: environment.TEST_DATABASE_URL.replace('localhost', host),
+      };
+      const snapshot = { ...original };
+      const { io } = fixture();
+      await runEphemeralTests('api', [], original, io);
+      const childUrl = io.run.mock.calls[0][2].DATABASE_URL;
+      expect(new URL(childUrl).hostname).toBe('127.0.0.1');
+      expect(io.identityAt).toHaveBeenCalledWith(childUrl);
+      expect(io.admin).toHaveBeenCalledWith(original.TEST_DATABASE_URL);
+      expect(original).toEqual(snapshot);
+    },
+  );
+
+  it('rechaza un host no autorizado antes de conectar o crear bases', async () => {
+    const { io, admin } = fixture();
+    await expect(
+      runEphemeralTests(
+        'api',
+        [],
+        {
+          ...environment,
+          TEST_DATABASE_URL: environment.TEST_DATABASE_URL.replace('localhost', 'db.example.test'),
+        },
+        io,
+      ),
+    ).rejects.toThrow(
+      'TEST_DATABASE_URL apunta a un host no permitido por la política de pruebas.',
+    );
+    expect(io.identityAt).not.toHaveBeenCalled();
+    expect(io.admin).not.toHaveBeenCalled();
+    expect(io.run).not.toHaveBeenCalled();
+    expect(admin.$executeRawUnsafe).not.toHaveBeenCalled();
+  });
+
   it.each(['api', 'worker'])('completa %s y mantiene identidad en ambas fases', async (suite) => {
     const { io, admin } = fixture();
     await runEphemeralTests(suite, ['src/example.integration.test.ts'], environment, io);
-    expect(io.run.mock.calls.map(([command]) => command)).toEqual(['prisma', 'vitest']);
+    expect(io.run.mock.calls.map(([command]) => command)).toEqual(
+      suite === 'worker' ? ['prisma', 'prisma', 'vitest'] : ['prisma', 'vitest'],
+    );
     const child = io.run.mock.calls[0][2];
     expect(child[`${suite.toUpperCase()}_TEST_DATABASE_NAME`]).toMatch(
       new RegExp(`^benhouse_${suite}_`),
     );
     expect(child[`${suite.toUpperCase()}_TEST_DATABASE_OID`]).toBe('3');
     expect(child[`${suite.toUpperCase()}_TEST_DATABASE_SYSTEM`]).toBe('100');
-    if (suite === 'worker')
-      expect(child.WORKER_SHARED_TEST_DATABASE_URL).toBe(environment.TEST_DATABASE_URL);
-    expect(admin.$executeRawUnsafe).toHaveBeenCalledTimes(2);
-    expect(admin.$disconnect).toHaveBeenCalledOnce();
+    if (suite === 'worker') {
+      const testChild = io.run.mock.calls[2][2];
+      expect(testChild.WORKER_FOREIGN_TEST_DATABASE_URL).not.toBe(environment.TEST_DATABASE_URL);
+      expect(testChild.WORKER_FOREIGN_TEST_DATABASE_NAME).not.toBe(
+        testChild.WORKER_TEST_DATABASE_NAME,
+      );
+      expect(testChild.WORKER_FOREIGN_TEST_DATABASE_OID).toBe('4');
+      expect(testChild.WORKER_FOREIGN_TEST_DATABASE_SYSTEM).toBe('100');
+      expect(testChild.WORKER_SHARED_TEST_DATABASE_URL).toBeUndefined();
+    }
+    expect(admin.$executeRawUnsafe).toHaveBeenCalledTimes(suite === 'worker' ? 4 : 2);
+    expect(admin.$disconnect).toHaveBeenCalledTimes(suite === 'worker' ? 2 : 1);
   });
 
   it('genera nombres distintos sin usar el nombre recibido en env', async () => {
@@ -105,6 +162,24 @@ describe('runner efímero API/worker: sin fallback ni borrado ajeno', () => {
       second.io.run.mock.calls[0][2].API_TEST_DATABASE_NAME,
     );
   });
+  it.each(['second-create', 'foreign-alias-primary', 'tests'])(
+    'worker no usa históricos si falla la segunda base: %s',
+    async (failure) => {
+      const { io, admin } = fixture([failure]);
+      await expect(runEphemeralTests('worker', [], environment, io)).rejects.toThrow(
+        AggregateError,
+      );
+      const commands = admin.$executeRawUnsafe.mock.calls.map(([sql]) => sql);
+      expect(
+        commands.every((sql) => !/"benhouse(_test)?"/.test(sql) && !sql.includes('FORCE')),
+      ).toBe(true);
+      expect(commands.filter((sql) => sql.startsWith('DROP'))).toHaveLength(
+        failure === 'second-create' ? 1 : 2,
+      );
+      if (failure !== 'tests')
+        expect(io.run.mock.calls.some(([command]) => command === 'vitest')).toBe(false);
+    },
+  );
 
   it.each(['shared-alias-dev', 'shared-wrong-name'])(
     'rechaza identidad protegida %s antes de DDL',

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
+import { configuredStorage } from '@benhouse/storage';
+import { processWorkerCycle } from './index';
 import { createPrismaClient, Prisma, verifyDatabaseInfrastructure } from '@benhouse/database';
 import {
   loadLocalEnvironmentFile,
@@ -537,22 +539,33 @@ describe('outbox de invitaciones B1.5', () => {
   it.each(['PENDING_FUTURE', 'PROCESSING_LEASE', 'INSERTED_LATER'] as const)(
     'aislamiento temporal: conserva íntegro evento ajeno %s',
     async (scenario) => {
-      const sharedUrl = process.env.WORKER_SHARED_TEST_DATABASE_URL;
+      const sharedUrl = process.env.WORKER_FOREIGN_TEST_DATABASE_URL;
       if (!sharedUrl) throw new Error('Falta el destino externo verificado por el runner.');
       const foreign = createPrismaClient({ datasourceUrl: sharedUrl });
       const foreignId = randomUUID();
       const errors: unknown[] = [];
       let verified = false;
-      try {
-        const [identity] = await foreign.$queryRaw<Array<{ name: string; oid: string }>>`
-          SELECT current_database() AS name, oid::text AS oid FROM pg_database
-          WHERE datname=current_database()
+      const verifyForeign = async () => {
+        const [identity] = await foreign.$queryRaw<
+          Array<{ name: string; oid: string; system: string }>
+        >`
+          SELECT current_database() AS name, d.oid::text AS oid, c.system_identifier::text AS system
+          FROM pg_database d CROSS JOIN pg_control_system() c WHERE datname=current_database()
         `;
         if (
-          identity?.name !== 'benhouse_test' ||
-          identity.oid === process.env.WORKER_TEST_DATABASE_OID
+          process.env.NODE_ENV !== 'test' ||
+          !/^benhouse_worker_[a-f0-9]{32}_test$/.test(identity?.name ?? '') ||
+          identity?.name !== process.env.WORKER_FOREIGN_TEST_DATABASE_NAME ||
+          identity?.oid !== process.env.WORKER_FOREIGN_TEST_DATABASE_OID ||
+          identity?.system !== process.env.WORKER_FOREIGN_TEST_DATABASE_SYSTEM ||
+          identity?.name === process.env.WORKER_TEST_DATABASE_NAME ||
+          (identity?.system === process.env.WORKER_TEST_DATABASE_SYSTEM &&
+            identity?.oid === process.env.WORKER_TEST_DATABASE_OID)
         )
-          throw new Error('El fixture ajeno no está físicamente separado.');
+          throw new Error('El fixture ajeno no es la segunda base efímera verificada.');
+      };
+      try {
+        await verifyForeign();
         verified = true;
         const [clock] = await foreign.$queryRaw<Array<{ deadline: Date }>>`
           SELECT date_trunc('milliseconds', clock_timestamp() + interval '10 seconds') AS deadline
@@ -629,7 +642,10 @@ describe('outbox de invitaciones B1.5', () => {
             ? [
                 {
                   name: 'evento ajeno sintético propio',
-                  run: () => foreign.outboxEvent.deleteMany({ where: { id: foreignId } }),
+                  run: async () => {
+                    await verifyForeign();
+                    await foreign.outboxEvent.deleteMany({ where: { id: foreignId } });
+                  },
                 },
               ]
             : [],
@@ -641,6 +657,57 @@ describe('outbox de invitaciones B1.5', () => {
     },
     25_000,
   );
+  it('la composición real procesa limpieza de Media e invitación en el mismo ciclo', async () => {
+    await withFixture(async ({ client, eventId }) => {
+      const storage = await configuredStorage();
+      try {
+        const p = await client.property.create({ data: { type: 'HOUSE' } });
+        const media = await client.media.create({
+          data: {
+            propertyId: p.id,
+            storageKey: randomBytes(32).toString('hex'),
+            createdByUserId: randomUUID(),
+            uploadSessionId: randomUUID(),
+            tokenDigest: 'a'.repeat(64),
+            sha256: 'b'.repeat(64),
+            intentKey: randomUUID(),
+            size: 3,
+            mime: 'image/png',
+            createdAt: new Date(Date.now() - 60_000),
+            expiresAt: new Date(Date.now() - 1000),
+          },
+        });
+        await storage.put(media.storageKey, Buffer.from('abc'));
+        const cleanup = await client.outboxEvent.create({
+          data: {
+            eventType: 'MEDIA_UPLOAD_CLEANUP',
+            aggregateType: 'MEDIA',
+            aggregateId: media.id,
+            availableAt: new Date(0),
+          },
+        });
+        const deliverInvitation = vi.fn(async () => undefined);
+        expect(
+          await processWorkerCycle(client, readAppConfig().auth, storage, { deliverInvitation }),
+        ).toEqual({ media: true, invitation: 'PROCESSED' });
+        expect(deliverInvitation).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ eventId }),
+        );
+        expect(await storage.read(media.storageKey)).toBeNull();
+        expect((await client.media.findUniqueOrThrow({ where: { id: media.id } })).status).toBe(
+          'EXPIRED',
+        );
+        expect(
+          (await client.outboxEvent.findUniqueOrThrow({ where: { id: cleanup.id } })).status,
+        ).toBe('PROCESSED');
+        expect(
+          (await client.outboxEvent.findUniqueOrThrow({ where: { id: eventId } })).status,
+        ).toBe('PROCESSED');
+      } finally {
+        storage.close();
+      }
+    });
+  });
 
   it('reintenta sin transporte y respeta un lease PROCESSING vigente', async () => {
     await withFixture(async ({ client, eventId }) => {

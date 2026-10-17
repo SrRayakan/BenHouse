@@ -20,6 +20,6 @@ No hay fallback. Creación, identidad o migración fallidas impiden ejecutar las
 
 Los errores del driver se sustituyen por fases y nombres seguros; no se imprimen URLs con credenciales. No se modifican las policies, servicios ni consultas productivas de C1.1.
 
-Regresiones unitarias: identidad incorrecta (nombre/OID/sistema), alias de bases protegidas, preparación parcial sin OID, migración fallida, pruebas fallidas, limpieza fallida, DROP inefectivo, cambio de administrador, OID reemplazado, fallo de desconexión y combinaciones. El mismo flujo se prueba para el worker y conserva sus variables de sondas compartidas.
+Regresiones unitarias: identidad incorrecta (nombre/OID/sistema), alias de bases protegidas, preparación parcial sin OID, migración fallida, pruebas fallidas, limpieza fallida, DROP inefectivo, cambio de administrador, OID reemplazado, fallo de desconexión y combinaciones. El worker reutiliza el flujo para dos bases efímeras; sus sondas ajenas ya no reciben la URL compartida histórica.
 
 Las limpiezas globales heredadas de identidad quedan contenidas físicamente en la base efímera. No se han borrado ni reconstruido los residuos históricos de `benhouse_test`. El runner genérico antiguo de database conserva su contrato; al lanzar Vitest API sin las expectativas del runner exclusivo, la propia suite rechaza la ejecución. La validación y las limitaciones de la corrección están en `docs/C1-GUARD-VALIDATION.md`.

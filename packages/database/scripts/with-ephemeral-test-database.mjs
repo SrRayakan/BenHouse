@@ -29,7 +29,7 @@ function assertIdentity(identity, name) {
     throw new Error('Identidad PostgreSQL incompleta o incorrecta.');
 }
 function assertDistinct(left, right) {
-  if (left.system === right.system && left.oid === right.oid)
+  if (left.name === right.name || (left.system === right.system && left.oid === right.oid))
     throw new Error('Las bases no están físicamente aisladas.');
 }
 export async function readIdentity(client) {
@@ -61,6 +61,41 @@ function run(command, args, environment) {
 
 // Dependencias inyectables solo para regresiones unitarias; la CLI usa estas implementaciones.
 export async function runEphemeralTests(suite, args, environment = process.env, overrides = {}) {
+  const execute = overrides.run ?? run;
+  const primaryOverrides =
+    suite !== 'worker'
+      ? overrides
+      : {
+          ...overrides,
+          run: async (command, parameters, primary) => {
+            if (command !== 'vitest') return execute(command, parameters, primary);
+            // El segundo runner conserva su identidad y limpia en finally después de
+            // las pruebas. Nunca se entrega benhouse_test como destino de fixtures.
+            await runSingleEphemeral('worker', [], environment, {
+              ...overrides,
+              run: async (secondaryCommand, secondaryParameters, foreign) => {
+                if (secondaryCommand !== 'vitest')
+                  return execute(secondaryCommand, secondaryParameters, foreign);
+                const identity = (child) => ({
+                  name: child.WORKER_TEST_DATABASE_NAME,
+                  oid: child.WORKER_TEST_DATABASE_OID,
+                  system: child.WORKER_TEST_DATABASE_SYSTEM,
+                });
+                assertDistinct(identity(primary), identity(foreign));
+                await execute(command, parameters, {
+                  ...primary,
+                  WORKER_FOREIGN_TEST_DATABASE_URL: foreign.DATABASE_URL,
+                  WORKER_FOREIGN_TEST_DATABASE_NAME: foreign.WORKER_TEST_DATABASE_NAME,
+                  WORKER_FOREIGN_TEST_DATABASE_OID: foreign.WORKER_TEST_DATABASE_OID,
+                  WORKER_FOREIGN_TEST_DATABASE_SYSTEM: foreign.WORKER_TEST_DATABASE_SYSTEM,
+                });
+              },
+            });
+          },
+        };
+  await runSingleEphemeral(suite, args, environment, primaryOverrides);
+}
+async function runSingleEphemeral(suite, args, environment, overrides) {
   assertSuite(suite);
   createTestChildEnvironment(environment);
   const io = {
@@ -74,6 +109,10 @@ export async function runEphemeralTests(suite, args, environment = process.env, 
   const name = `benhouse_${suite}_${randomUUID().replaceAll('-', '')}_test`;
   const sharedUrl = environment.TEST_DATABASE_URL;
   const url = new URL(sharedUrl);
+  // En Docker Desktop Windows, localhost resuelve también ::1 (sin listener):
+  // la apertura de conexiones Prisma tarda ~2 s y puede agotar maxWait. Solo
+  // normalizamos la URL efímera; OID/sistema se verifican antes de migrarla.
+  if (url.hostname === 'localhost') url.hostname = '127.0.0.1';
   url.pathname = `/${name}`;
   url.searchParams.set('schema', 'public');
   createTestChildEnvironment({ ...environment, TEST_DATABASE_URL: url.toString() });
@@ -117,7 +156,7 @@ export async function runEphemeralTests(suite, args, environment = process.env, 
       [`${prefix}_TEST_DATABASE_NAME`]: name,
       [`${prefix}_TEST_DATABASE_OID`]: owned.oid,
       [`${prefix}_TEST_DATABASE_SYSTEM`]: owned.system,
-      ...(suite === 'worker' ? { WORKER_SHARED_TEST_DATABASE_URL: sharedUrl } : {}),
+      WORKER_SHARED_TEST_DATABASE_URL: undefined,
     };
     io.log(
       `${suite}: identidad propia verificada ${name}, OID ${owned.oid}, sistema ${owned.system}.`,
@@ -128,7 +167,8 @@ export async function runEphemeralTests(suite, args, environment = process.env, 
     assertOwnedIdentity(suite, owned, await io.identityAt(url.toString()));
     phase = 'pruebas';
     await io.run('vitest', ['run', '--config', 'vitest.integration.config.mts', ...args], child);
-  } catch {
+  } catch (error) {
+    if (error instanceof AggregateError) errors.push(...error.errors);
     errors.push(
       new Error(
         `${suite}: falló ${phase}; no se usa ninguna base alternativa. Base prevista: ${name}.`,

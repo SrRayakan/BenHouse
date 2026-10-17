@@ -1,0 +1,286 @@
+{
+  "benhouse": {
+    "identity": [
+      {
+        "name": "benhouse",
+        "oid": "16384",
+        "system": "7681450735968391207",
+        "ro": "on"
+      }
+    ],
+    "protection": [
+      {
+        "setdatabase": "16384",
+        "setrole": "0",
+        "setconfig": [
+          "search_path=\"$user\", public, topology, tiger",
+          "default_transaction_read_only=on"
+        ]
+      },
+      {
+        "setdatabase": "16385",
+        "setrole": "0",
+        "setconfig": [
+          "search_path=\"$user\", public, topology, tiger"
+        ]
+      }
+    ],
+    "inventory": [
+      {
+        "datname": "benhouse",
+        "oid": "16384"
+      },
+      {
+        "datname": "benhouse_test",
+        "oid": "79967"
+      },
+      {
+        "datname": "postgres",
+        "oid": "5"
+      },
+      {
+        "datname": "template0",
+        "oid": "4"
+      },
+      {
+        "datname": "template1",
+        "oid": "1"
+      },
+      {
+        "datname": "template_postgis",
+        "oid": "16385"
+      }
+    ],
+    "hashes": {
+      "_prisma_migrations": {
+        "count": 5,
+        "sha": "e8013758bdcff42f31c43c175a093a94dc65d387d0df324f23274484eb9b0b81"
+      },
+      "account_token": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "audit_event": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "auth_rate_limit": {
+        "count": 1,
+        "sha": "2a08c95857c8d0e27a7ea88ad1377000620a463344bfd8388d04153815aab70e"
+      },
+      "listing": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "location": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "organization": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "organization_invitation": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "organization_member": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "outbox_event": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "password_credential": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "property": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "property_authorization": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "session": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "user": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    },
+    "migrations": [
+      {
+        "migration_name": "20260904000000_enable_postgis",
+        "checksum": "a6f930447ac37ac87795cfa0652ad6d44f6cf683422cb0226f00b181e33fb1bd",
+        "finished_at": "2026-09-03T23:30:29.913Z"
+      },
+      {
+        "migration_name": "20260906231526_identity_core",
+        "checksum": "1c035025fdc3cca8e1d194f20ed7bbee1e5ace1543cb864626af32176c060479",
+        "finished_at": "2026-09-07T19:42:48.847Z"
+      },
+      {
+        "migration_name": "20260924000000_property_draft_listing_core",
+        "checksum": "da4a3f067554dfcc036f361414a3ace3abc005cdbabe61cb58fc3c65f0e805e6",
+        "finished_at": "2026-09-24T16:18:07.363Z"
+      },
+      {
+        "migration_name": "20260927000000_property_authorization_scheduled_revocation",
+        "checksum": "abf2dcdcebc083b1a85c5d0573621bca8234e1860afb188337b39670a1e23dc5",
+        "finished_at": "2026-09-28T08:40:21.393Z"
+      },
+      {
+        "migration_name": "20261011000000_location_core",
+        "checksum": "2372da47dfde5bb230f15e4949225783e25e9d0806a089876a9b75884d988ba3",
+        "finished_at": "2026-10-13T10:46:46.389Z"
+      }
+    ]
+  },
+  "benhouse_test": {
+    "identity": [
+      {
+        "name": "benhouse_test",
+        "oid": "79967",
+        "system": "7681450735968391207",
+        "ro": "on"
+      }
+    ],
+    "protection": [
+      {
+        "setdatabase": "16384",
+        "setrole": "0",
+        "setconfig": [
+          "search_path=\"$user\", public, topology, tiger",
+          "default_transaction_read_only=on"
+        ]
+      },
+      {
+        "setdatabase": "16385",
+        "setrole": "0",
+        "setconfig": [
+          "search_path=\"$user\", public, topology, tiger"
+        ]
+      }
+    ],
+    "inventory": [
+      {
+        "datname": "benhouse",
+        "oid": "16384"
+      },
+      {
+        "datname": "benhouse_test",
+        "oid": "79967"
+      },
+      {
+        "datname": "postgres",
+        "oid": "5"
+      },
+      {
+        "datname": "template0",
+        "oid": "4"
+      },
+      {
+        "datname": "template1",
+        "oid": "1"
+      },
+      {
+        "datname": "template_postgis",
+        "oid": "16385"
+      }
+    ],
+    "hashes": {
+      "_prisma_migrations": {
+        "count": 5,
+        "sha": "55f09ba647b9b3caa49b460b77cda36001769854fae3c8cd9b933941522daf4b"
+      },
+      "account_token": {
+        "count": 856,
+        "sha": "51e6bf5109a734e6056edfbba115638832c5311f638afbbb0509b7d99ae83a9d"
+      },
+      "audit_event": {
+        "count": 2503,
+        "sha": "24b1370193dc226e0ff655877c2a7db7f042506b0fc80c304e0b14e3ec96e767"
+      },
+      "auth_rate_limit": {
+        "count": 7407,
+        "sha": "8f4a7bbf02d9a99db654bed8593d0a432ea0e18b11274da7b21546461e124dc3"
+      },
+      "listing": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "location": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "organization": {
+        "count": 963,
+        "sha": "78e95becbc084bcf235143e096a4aef5aa1a364b38764a35f950901fe5d09582"
+      },
+      "organization_invitation": {
+        "count": 31,
+        "sha": "2ac847884c749ec4bae62086cf6790371888ae4d8cc766925f32cce0b084588c"
+      },
+      "organization_member": {
+        "count": 1227,
+        "sha": "f341b830cecafbdbba3e42d74d03ff44f03d73d4387e14b57c135caa86c18cd2"
+      },
+      "outbox_event": {
+        "count": 760,
+        "sha": "a555e3435be06ae6d4b46b66a990c1e4a918e54d030383ad3f1af0c0fb63ab50"
+      },
+      "password_credential": {
+        "count": 1248,
+        "sha": "09f3d85aa2a810922b362ded45e21cc51b872f31560c4ce4c14cf2aeaa5bb01d"
+      },
+      "property": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "property_authorization": {
+        "count": 0,
+        "sha": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      },
+      "session": {
+        "count": 2365,
+        "sha": "01792ce0a17dee3312aa0cecc7cdb68fc5fe16bb0dab93555dfaee51268d5fb3"
+      },
+      "user": {
+        "count": 2917,
+        "sha": "9c4c09df31956420552f4d128d112da4a0191fb1d01141273d00aaed59819fb9"
+      }
+    },
+    "migrations": [
+      {
+        "migration_name": "20260904000000_enable_postgis",
+        "checksum": "a6f930447ac37ac87795cfa0652ad6d44f6cf683422cb0226f00b181e33fb1bd",
+        "finished_at": "2026-09-18T16:11:39.869Z"
+      },
+      {
+        "migration_name": "20260906231526_identity_core",
+        "checksum": "1c035025fdc3cca8e1d194f20ed7bbee1e5ace1543cb864626af32176c060479",
+        "finished_at": "2026-09-18T16:11:40.185Z"
+      },
+      {
+        "migration_name": "20260924000000_property_draft_listing_core",
+        "checksum": "da4a3f067554dfcc036f361414a3ace3abc005cdbabe61cb58fc3c65f0e805e6",
+        "finished_at": "2026-09-24T00:11:45.949Z"
+      },
+      {
+        "migration_name": "20260927000000_property_authorization_scheduled_revocation",
+        "checksum": "abf2dcdcebc083b1a85c5d0573621bca8234e1860afb188337b39670a1e23dc5",
+        "finished_at": "2026-09-27T21:12:01.457Z"
+      },
+      {
+        "migration_name": "20261011000000_location_core",
+        "checksum": "2372da47dfde5bb230f15e4949225783e25e9d0806a089876a9b75884d988ba3",
+        "finished_at": "2026-10-10T23:21:45.889Z"
+      }
+    ]
+  }
+}

@@ -3,9 +3,9 @@
   "version": "0.4.0",
   "private": true,
   "scripts": {
-    "predev": "pnpm --filter @benhouse/config build && pnpm --filter @benhouse/database build",
+    "predev": "pnpm --filter @benhouse/config build && pnpm --filter @benhouse/database build && pnpm --filter @benhouse/storage build",
     "dev": "nest start --watch",
-    "prebuild": "pnpm --filter @benhouse/config build && pnpm --filter @benhouse/database build",
+    "prebuild": "pnpm --filter @benhouse/config build && pnpm --filter @benhouse/database build && pnpm --filter @benhouse/storage build",
     "build": "nest build",
     "start": "node dist/main.js",
     "lint": "eslint src",
@@ -14,6 +14,7 @@
     "test:integration": "node ../../packages/database/scripts/with-api-test-database.mjs"
   },
   "dependencies": {
+    "@benhouse/storage": "workspace:*",
     "@benhouse/config": "workspace:*",
     "@benhouse/database": "workspace:*",
     "@nestjs/common": "^11.1.11",

@@ -77,6 +77,15 @@ La API ofrece:
 
 ## Validación
 
+C1.2 añade fotografías privadas de Property con objetos locales en RustFS. API y
+worker requieren `STORAGE_PROVIDER=s3-local` y configuración S3 privada; consulta el
+[flujo, configuración y pruebas aisladas](docs/C1-MEDIA-API.md). La entrega C1.2
+no aplica migraciones a las bases históricas ni habilita sus escritores.
+El [procedimiento de aislamiento y copia/restauración](docs/C1-MEDIA-OBJECTS-OPERATIONS.md)
+reemplaza el proveedor anterior de archivos por rutas Windows.
+Los [resultados nuevos y límites para auditoría](docs/C1-MEDIA-OBJECTS-VALIDATION.md)
+mantienen explícito el bloqueo de commit y los dos P2 heredados de C1.1.
+
 ```bash
 pnpm lint
 pnpm typecheck

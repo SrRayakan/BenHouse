@@ -14,6 +14,7 @@ import { AuthService } from './auth.service';
 import { serializeAccountToken } from './account-token';
 import { PasswordEngine } from './password';
 import { createSessionToken, sessionSecretDigest } from './session-token';
+import { CausalWorkScope } from '../organizations/postgres-test-fixtures';
 
 class FakeClock extends SystemClock {
   constructor(private instant: Date) {
@@ -396,43 +397,49 @@ describe('persistencia funcional B1.2', () => {
       const release = new Promise<void>((resolve) => (releaseLock = resolve));
       const blockerClient = createPrismaClient();
       await blockerClient.$connect();
-      const blocker = blockerClient.$transaction(async (tx) => {
-        await tx.$queryRaw`SELECT "id" FROM "session" WHERE "id" = ${token.selector}::uuid FOR UPDATE`;
-        lockAcquired();
-        await release;
-      });
-      await locked;
-
-      const auth = new AuthService(
-        database(),
-        { consume: async () => undefined } as unknown as AuthRateLimitService,
-        new SystemClock(),
-        config,
-        {} as PasswordEngine,
-      );
-      let settled = false;
-      const sessionRead = auth.getSession(token.value, `expiry-race-${id}`);
-      void sessionRead.then(
-        () => (settled = true),
-        () => (settled = true),
+      const scope = new CausalWorkScope();
+      const blocker = scope.observe(
+        blockerClient.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT "id" FROM "session" WHERE "id" = ${token.selector}::uuid FOR UPDATE`;
+          lockAcquired();
+          await release;
+        }),
       );
       try {
+        // Si la transacción no llega a empezar, propagar su error y limpiar;
+        // no esperar indefinidamente una señal locked que ya no puede emitirse.
+        await scope.wait(locked);
+        const auth = new AuthService(
+          database(),
+          { consume: async () => undefined } as unknown as AuthRateLimitService,
+          new SystemClock(),
+          config,
+          {} as PasswordEngine,
+        );
+        let settled = false;
+        const sessionRead = scope.observe(auth.getSession(token.value, `expiry-race-${id}`));
+        void sessionRead.then(
+          () => (settled = true),
+          () => (settled = true),
+        );
         await new Promise((resolve) => setTimeout(resolve, 100));
         expect(settled).toBe(false);
         await new Promise((resolve) => setTimeout(resolve, 800));
+        releaseLock();
+        await scope.wait(blocker);
+
+        await expect(scope.wait(sessionRead)).resolves.toEqual({
+          view: { authenticated: false },
+          clearCookie: true,
+        });
+        const persisted = await client.session.findUniqueOrThrow({ where: { id: token.selector } });
+        expect(persisted.lastActivityAt).toEqual(staleActivity);
+        expect(persisted.idleExpiresAt).toEqual(soon);
       } finally {
         releaseLock();
-        await blocker;
+        await scope.settle();
         await blockerClient.$disconnect();
       }
-
-      await expect(sessionRead).resolves.toEqual({
-        view: { authenticated: false },
-        clearCookie: true,
-      });
-      const persisted = await client.session.findUniqueOrThrow({ where: { id: token.selector } });
-      expect(persisted.lastActivityAt).toEqual(staleActivity);
-      expect(persisted.idleExpiresAt).toEqual(soon);
     },
   );
 

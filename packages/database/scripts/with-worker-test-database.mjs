@@ -13,5 +13,8 @@ export function runWorkerTests(args, environment = process.env) {
 }
 if (import.meta.main) {
   loadRootEnvironment();
-  await runWorkerTests(process.argv.slice(2));
+  const { withLocalObjectService } = await import('../../storage/scripts/local-object-service.mjs');
+  await withLocalObjectService(async (storage) => {
+    await runWorkerTests(process.argv.slice(2), { ...process.env, ...storage });
+  });
 }

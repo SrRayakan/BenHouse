@@ -29,8 +29,8 @@ export function configureApplication(app: NestExpressApplication, config: AppCon
     origin: (origin, callback) => {
       callback(null, origin === undefined || config.corsAllowedOrigins.includes(origin));
     },
-    methods: ['GET', 'POST', 'PATCH', 'PUT', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Request-ID'],
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'X-CSRF-Token', 'X-Request-ID', 'X-Upload-Token'],
     credentials: true,
   });
 }

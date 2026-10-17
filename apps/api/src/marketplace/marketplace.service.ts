@@ -721,7 +721,7 @@ async function activeMemberships(tx: Tx, userId: string): Promise<MembershipReco
   });
 }
 
-async function lockActorOrganizations(
+export async function lockActorOrganizations(
   tx: Tx,
   userId: string,
   additionalOrganizationIds: readonly string[] = [],
@@ -763,11 +763,11 @@ async function lockOrganizationMembers(tx: Tx, organizationId: string): Promise<
   );
 }
 
-async function lockProperty(tx: Tx, id: string): Promise<void> {
+export async function lockProperty(tx: Tx, id: string): Promise<void> {
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "property" WHERE "id" = ${id}::uuid FOR UPDATE`);
 }
 
-async function lockPropertyAuthorizations(tx: Tx, propertyId: string): Promise<void> {
+export async function lockPropertyAuthorizations(tx: Tx, propertyId: string): Promise<void> {
   await tx.$queryRaw(
     Prisma.sql`SELECT "id" FROM "property_authorization" WHERE "property_id" = ${propertyId}::uuid ORDER BY "id" FOR UPDATE`,
   );
@@ -777,7 +777,7 @@ async function lockListing(tx: Tx, id: string): Promise<void> {
   await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "listing" WHERE "id" = ${id}::uuid FOR UPDATE`);
 }
 
-async function databaseNow(tx: Tx): Promise<Date> {
+export async function databaseNow(tx: Tx): Promise<Date> {
   const rows = await tx.$queryRaw<Array<{ now: Date }>>(
     Prisma.sql`SELECT clock_timestamp() AS now`,
   );

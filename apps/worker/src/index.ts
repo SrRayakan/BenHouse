@@ -1,9 +1,25 @@
 import { createPrismaClient, verifyDatabaseInfrastructure } from '@benhouse/database';
 import { loadLocalEnvironmentFile, readAppConfig, redactSensitiveValue } from '@benhouse/config';
-import { processNextInvitation, UnconfiguredInvitationNotificationPort } from './invitation-outbox';
+import {
+  processNextInvitation,
+  UnconfiguredInvitationNotificationPort,
+  type InvitationNotificationPort,
+} from './invitation-outbox';
+import { configuredStorage, type StorageProvider } from '@benhouse/storage';
+import { processNextMediaCleanup } from './media-cleanup';
 
 export function getWorkerStartupMessage(): string {
   return 'BenHouse Worker activo';
+}
+export async function processWorkerCycle(
+  client: ReturnType<typeof createPrismaClient>,
+  auth: ReturnType<typeof readAppConfig>['auth'],
+  storage: StorageProvider,
+  notifications: InvitationNotificationPort,
+) {
+  const media = await processNextMediaCleanup(client, storage);
+  const invitation = await processNextInvitation(client, auth, notifications);
+  return { media, invitation };
 }
 
 type WorkerLoopOptions = {
@@ -72,15 +88,24 @@ export function createWorkerLoop({
 export async function startWorker(): Promise<void> {
   loadLocalEnvironmentFile();
   const config = readAppConfig();
+  const storage = await configuredStorage();
 
   const client = createPrismaClient();
   const loop = createWorkerLoop({
     processNext: () =>
-      processNextInvitation(client, config.auth, new UnconfiguredInvitationNotificationPort()),
-    disconnect: () => client.$disconnect(),
+      processWorkerCycle(
+        client,
+        config.auth,
+        storage,
+        new UnconfiguredInvitationNotificationPort(),
+      ),
+    disconnect: async () => {
+      storage.close();
+      await client.$disconnect();
+    },
     reportError: () => {
       console.error(
-        JSON.stringify({ level: 'error', service: 'worker', code: 'INVITATION_OUTBOX_FAILED' }),
+        JSON.stringify({ level: 'error', service: 'worker', code: 'WORKER_OUTBOX_FAILED' }),
       );
     },
   });

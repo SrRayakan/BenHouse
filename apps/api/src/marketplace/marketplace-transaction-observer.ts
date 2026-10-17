@@ -3,6 +3,7 @@ import { Prisma } from '@benhouse/database';
 import type { Prisma as PrismaTypes } from '@benhouse/database';
 
 export type MarketplaceTransactionOperation =
+  | 'MEDIA_ACCESS'
   | 'PROPERTY_CREATE'
   | 'PROPERTY_UPDATE'
   | 'PROPERTY_LOCATION_SET'

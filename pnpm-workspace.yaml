@@ -2,6 +2,10 @@ packages:
   - apps/*
   - packages/*
 
+# Next permite ^0.34.5; evitar conservar ese binario vulnerable junto a Storage.
+overrides:
+  'next>sharp': 0.35.5
+
 onlyBuiltDependencies:
   - esbuild
   - sharp

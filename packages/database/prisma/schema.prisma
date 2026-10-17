@@ -294,11 +294,49 @@ model Property {
   updatedAt        DateTime                             @updatedAt @map("updated_at") @db.Timestamptz(3)
   authorizations   PropertyAuthorization[]
   listings         Listing[]
+  mediaVersion     Int                                  @default(0) @map("media_version")
+  media            Media[]
 
   @@index([status, createdAt(sort: Desc), id], map: "property_status_created_idx")
   @@index([locationId], map: "property_location_idx")
   @@index([locationPoint], type: Gist, map: "property_location_point_idx")
   @@map("property")
+}
+
+enum MediaStatus {
+  PENDING
+  READY
+  ARCHIVED
+  CANCELLED
+  EXPIRED
+}
+
+model Media {
+  id              String      @id @default(uuid()) @db.Uuid
+  propertyId      String      @map("property_id") @db.Uuid
+  storageKey      String      @unique(map: "media_storage_key_key") @map("storage_key") @db.VarChar(64)
+  createdByUserId String      @map("created_by_user_id") @db.Uuid
+  uploadSessionId String      @map("upload_session_id") @db.Uuid
+  tokenDigest     String      @map("token_digest") @db.VarChar(64)
+  intentKey       String      @map("intent_key") @db.Uuid
+  mime            String      @db.VarChar(32)
+  size            Int
+  sha256          String      @db.VarChar(64)
+  width           Int?
+  height          Int?
+  position        Int?
+  status          MediaStatus @default(PENDING)
+  expiresAt       DateTime    @map("expires_at") @db.Timestamptz(3)
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  confirmedAt     DateTime?   @map("confirmed_at") @db.Timestamptz(3)
+  archivedAt      DateTime?   @map("archived_at") @db.Timestamptz(3)
+  cleanedAt       DateTime?   @map("cleaned_at") @db.Timestamptz(3)
+  property        Property    @relation(fields: [propertyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([createdByUserId, intentKey], map: "media_actor_intent_key")
+  @@unique([propertyId, position], map: "media_property_position_key")
+  @@index([propertyId, status, position], map: "media_property_status_position_idx")
+  @@map("media")
 }
 
 model PropertyAuthorization {
